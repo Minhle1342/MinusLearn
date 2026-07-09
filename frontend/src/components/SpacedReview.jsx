@@ -8,8 +8,9 @@ import {
   getNextDueDate,
   initSRState,
 } from '../utils/spacedRepetition';
+import { speakEnglishText } from '../utils/speech';
 
-export function SpacedReview({ words, activeTopicId, topics, srData, setSrData }) {
+export function SpacedReview({ words, activeTopicId, topics, srData, setSrData, settings }) {
   const [phase, setPhase] = useState('setup'); // 'setup' | 'reviewing' | 'summary'
   const [reviewQueue, setReviewQueue] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -42,12 +43,7 @@ export function SpacedReview({ words, activeTopicId, topics, srData, setSrData }
   }, [activeTopicId]);
 
   const speak = (text) => {
-    if (!window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'en-US';
-    utterance.rate = 0.9;
-    window.speechSynthesis.speak(utterance);
+    speakEnglishText(text, settings?.speechVoiceURI, { rate: 0.9 });
   };
 
   // --- Phase: SETUP ---
@@ -170,7 +166,7 @@ export function SpacedReview({ words, activeTopicId, topics, srData, setSrData }
   if (phase === 'setup') {
     return (
       <div className="flex-1 flex items-center justify-center p-lg md:p-xl">
-        <div className="w-full max-w-lg">
+        <div className="bg-surface border border-hairline rounded-[16px] p-[40px] shadow-sm max-w-lg w-full flex flex-col items-center text-center">
           {/* Header */}
           <div className="text-center mb-xl">
             <div className="inline-flex items-center gap-xs px-md py-xs bg-primary/10 text-primary rounded-full font-button text-button mb-md">

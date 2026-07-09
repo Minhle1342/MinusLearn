@@ -1,14 +1,13 @@
 import React, { useState } from 'react';
 import { Volume2, Edit2 } from 'lucide-react';
+import { speakEnglishText } from '../utils/speech';
 
-export function WordCard({ word, onEdit, viewMode = 'card' }) {
+export function WordCard({ word, onEdit, viewMode = 'card', settings }) {
   const [isFlipped, setIsFlipped] = useState(false);
 
   const speak = (e) => {
     e.stopPropagation();
-    const utterance = new SpeechSynthesisUtterance(word.word);
-    utterance.lang = 'en-US';
-    window.speechSynthesis.speak(utterance);
+    speakEnglishText(word.word, settings?.speechVoiceURI);
   };
 
   const handleEditClick = (e) => {

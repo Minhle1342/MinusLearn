@@ -11,6 +11,7 @@ import { SettingsModal } from './components/Modals/SettingsModal';
 import { ListeningPractice } from './components/ListeningPractice';
 import { ReadingPractice } from './components/ReadingPractice';
 import { SpacedReview } from './components/SpacedReview';
+import { SpeakingPractice } from './components/SpeakingPractice';
 
 function App() {
   const [topics, setTopics] = useLocalStorage('minuslearn_topics', [
@@ -19,17 +20,23 @@ function App() {
   const [words, setWords] = useLocalStorage('minuslearn_words', []);
   const [settings, setSettings] = useLocalStorage('minuslearn_settings', {
     apiKey: GEMINI_DEFAULT_KEY,
-    model: GEMINI_DEFAULT_MODEL
+    model: GEMINI_DEFAULT_MODEL,
+    imageModel: 'openai/gpt-image-2',
+    fontSize: 'medium',
+    fontStyle: 'inter',
+    theme: 'current',
+    speechVoiceURI: '',
+    speakingAssessmentMode: 'web-speech'
   });
   const [srData, setSrData] = useLocalStorage('minuslearn_sr_data', {});
 
   const [activeTopicId, setActiveTopicId] = useState('default');
-  const [activePage, setActivePage] = useState('vocabulary'); // 'vocabulary' | 'listening'
+  const [activePage, setActivePage] = useState('vocabulary');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [mistakeFilter, setMistakeFilter] = useState('none');
   const [viewMode, setViewMode] = useLocalStorage('minuslearn_view_mode', 'card');
 
-  // Modals state
   const [isTopicModalOpen, setIsTopicModalOpen] = useState(false);
   const [topicToEdit, setTopicToEdit] = useState(null);
 
@@ -39,7 +46,6 @@ function App() {
 
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
-  // Handle URL parameters for Extension integration
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const bulkParam = params.get('bulk');
@@ -61,19 +67,15 @@ function App() {
 
       setInitialAiText(bulkParam);
       setIsWordModalOpen(true);
-      // Clean up the URL without reloading the page
       window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, []);
 
-  // Theme application
   useEffect(() => {
-    // Clear previous theme classes
     document.body.classList.remove('theme-white-blue', 'theme-tokyo');
     document.body.classList.remove('font-style-serif', 'font-style-monospace');
     document.body.classList.remove('size-small', 'size-large');
 
-    // Apply new theme classes
     if (settings.theme === 'white-blue') document.body.classList.add('theme-white-blue');
     if (settings.theme === 'tokyo') document.body.classList.add('theme-tokyo');
 
@@ -84,33 +86,29 @@ function App() {
     if (settings.fontSize === 'large') document.body.classList.add('size-large');
   }, [settings.theme, settings.fontStyle, settings.fontSize]);
 
-  // Sync topics to Extension
   useEffect(() => {
     const syncTopics = () => {
       window.postMessage({
-        type: "MINUSLEARN_SYNC_TOPICS",
-        topics: topics
-      }, "*");
+        type: 'MINUSLEARN_SYNC_TOPICS',
+        topics
+      }, '*');
     };
 
-    // Sync immediately on change
     syncTopics();
 
-    // Also listen for extension requesting topics (fixes race conditions)
-    const handleMessage = (event) => {
-      if (event.source === window && event.data && event.data.type === "MINUSLEARN_REQUEST_TOPICS") {
+    const handleMessage = event => {
+      if (event.source === window && event.data && event.data.type === 'MINUSLEARN_REQUEST_TOPICS') {
         syncTopics();
       }
     };
 
-    window.addEventListener("message", handleMessage);
-    return () => window.removeEventListener("message", handleMessage);
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
   }, [topics]);
 
-  // Topic Handlers
-  const handleSaveTopic = (name) => {
+  const handleSaveTopic = name => {
     if (topicToEdit) {
-      setTopics(topics.map(t => t.id === topicToEdit.id ? { ...t, name } : t));
+      setTopics(topics.map(topic => topic.id === topicToEdit.id ? { ...topic, name } : topic));
     } else {
       const newTopic = {
         id: crypto.randomUUID(),
@@ -122,17 +120,16 @@ function App() {
     }
   };
 
-  const handleDeleteTopic = (id) => {
-    setTopics(topics.filter(t => t.id !== id));
-    setWords(words.filter(w => w.topicId !== id));
+  const handleDeleteTopic = id => {
+    setTopics(topics.filter(topic => topic.id !== id));
+    setWords(words.filter(word => word.topicId !== id));
     if (activeTopicId === id) setActiveTopicId(topics[0]?.id || null);
     setIsTopicModalOpen(false);
   };
 
-  // Word Handlers
-  const handleSaveWord = (wordData) => {
-    if (wordData.id && words.find(w => w.id === wordData.id)) {
-      setWords(words.map(w => w.id === wordData.id ? wordData : w));
+  const handleSaveWord = wordData => {
+    if (wordData.id && words.find(word => word.id === wordData.id)) {
+      setWords(words.map(word => word.id === wordData.id ? wordData : word));
     } else {
       const newWord = {
         ...wordData,
@@ -143,8 +140,8 @@ function App() {
     }
   };
 
-  const handleDeleteWord = (id) => {
-    setWords(words.filter(w => w.id !== id));
+  const handleDeleteWord = id => {
+    setWords(words.filter(word => word.id !== id));
     setIsWordModalOpen(false);
   };
 
@@ -166,7 +163,7 @@ function App() {
           activeTopicId={activeTopicId}
           setActiveTopicId={setActiveTopicId}
           onAddTopic={() => { setTopicToEdit(null); setIsTopicModalOpen(true); }}
-          onEditTopic={(id) => { setTopicToEdit(topics.find(t => t.id === id)); setIsTopicModalOpen(true); }}
+          onEditTopic={id => { setTopicToEdit(topics.find(topic => topic.id === id)); setIsTopicModalOpen(true); }}
           onDeleteTopic={handleDeleteTopic}
           words={words}
           srData={srData}
@@ -175,16 +172,28 @@ function App() {
         <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-canvas">
           {activePage === 'vocabulary' ? (
             <>
-              {/* Main toolbar (Search & Add Word) */}
               <div className="px-md md:px-xxl py-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-md border-b border-hairline bg-canvas shrink-0 fixed-top">
-                <div className="relative w-full md:w-96">
-                  <input
-                    value={searchTerm}
-                    onChange={e => setSearchTerm(e.target.value)}
-                    className="w-full pl-xl pr-sm py-sm bg-surface-container-low border border-hairline rounded-[4px] font-body-md text-body-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-shadow"
-                    placeholder="Tìm từ vựng..."
-                    type="text"
-                  />
+                <div className="flex items-center gap-sm w-full md:w-auto">
+                  <div className="relative w-full md:w-96 flex-shrink-0">
+                    <input
+                      value={searchTerm}
+                      onChange={event => setSearchTerm(event.target.value)}
+                      className="w-full pl-xl pr-sm py-sm bg-surface-container-low border border-hairline rounded-[8px] font-body-md text-body-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-shadow"
+                      placeholder="Tìm từ vựng..."
+                      type="text"
+                    />
+                  </div>
+                  <select
+                    value={mistakeFilter}
+                    onChange={e => setMistakeFilter(e.target.value)}
+                    className={`px-md py-sm rounded-[8px] border ${mistakeFilter !== 'none' ? 'bg-error text-white border-error' : 'bg-surface-container-low border-hairline text-on-surface-variant hover:bg-surface-container'} transition-colors font-button text-button whitespace-nowrap focus:outline-none`}
+                  >
+                    <option value="none" className="text-ink bg-surface">Tất cả từ vựng</option>
+                    <option value="any" className="text-ink bg-surface">Sai bất kỳ</option>
+                    <option value="listening" className="text-ink bg-surface">Sai luyện nghe</option>
+                    <option value="reading" className="text-ink bg-surface">Sai đọc - hiểu</option>
+                    <option value="both" className="text-ink bg-surface">Sai cả 2</option>
+                  </select>
                 </div>
 
                 <div className="flex gap-sm w-full md:w-auto items-center">
@@ -215,7 +224,6 @@ function App() {
                 </div>
               </div>
 
-              {/* Scrollable grid area */}
               <div className="flex-1 overflow-y-auto">
                 {activeTopicId ? (
                   <WordGrid
@@ -223,8 +231,10 @@ function App() {
                     activeTopicId={activeTopicId}
                     searchTerm={searchTerm}
                     viewMode={viewMode}
+                    settings={settings}
+                    mistakeFilter={mistakeFilter}
                     onAddWord={() => { setWordToEdit(null); setInitialAiText(''); setIsWordModalOpen(true); }}
-                    onEditWord={(id) => { setWordToEdit(words.find(w => w.id === id)); setInitialAiText(''); setIsWordModalOpen(true); }}
+                    onEditWord={id => { setWordToEdit(words.find(word => word.id === id)); setInitialAiText(''); setIsWordModalOpen(true); }}
                   />
                 ) : (
                   <div className="flex items-center justify-center h-full text-on-surface-variant">
@@ -239,6 +249,7 @@ function App() {
                 words={words}
                 activeTopicId={activeTopicId}
                 topics={topics}
+                settings={settings}
               />
             </div>
           ) : activePage === 'reading' ? (
@@ -249,6 +260,15 @@ function App() {
                 topics={topics}
               />
             </div>
+          ) : activePage === 'speaking' ? (
+            <div className="flex-1 overflow-y-auto bg-canvas-soft">
+              <SpeakingPractice
+                words={words}
+                activeTopicId={activeTopicId}
+                topics={topics}
+                onOpenSettings={() => setIsSettingsModalOpen(true)}
+              />
+            </div>
           ) : activePage === 'review' ? (
             <div className="flex-1 overflow-y-auto bg-canvas-soft">
               <SpacedReview
@@ -257,13 +277,13 @@ function App() {
                 topics={topics}
                 srData={srData}
                 setSrData={setSrData}
+                settings={settings}
               />
             </div>
           ) : null}
         </main>
       </div>
 
-      {/* Modals */}
       <TopicModal
         isOpen={isTopicModalOpen}
         onClose={() => setIsTopicModalOpen(false)}

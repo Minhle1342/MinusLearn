@@ -1,10 +1,25 @@
 import React from 'react';
 import { WordCard } from './WordCard';
 import { BookOpen, Plus } from 'lucide-react';
+import { useLocalStorage } from '../hooks/useLocalStorage';
 
-export function WordGrid({ words, activeTopicId, onAddWord, onEditWord, searchTerm, viewMode }) {
+export function WordGrid({ words, activeTopicId, onAddWord, onEditWord, searchTerm, viewMode, settings, mistakeFilter }) {
+  const [listeningMistakes] = useLocalStorage('minuslearn_mistakes', {});
+  const [readingMistakes] = useLocalStorage('minuslearn_reading_mistakes', {});
+
   const filteredWords = words.filter(w => {
     if (w.topicId !== activeTopicId) return false;
+    
+    if (mistakeFilter && mistakeFilter !== 'none') {
+      const isListeningMistake = !!listeningMistakes[w.id];
+      const isReadingMistake = !!readingMistakes[w.id];
+      
+      if (mistakeFilter === 'any' && !isListeningMistake && !isReadingMistake) return false;
+      if (mistakeFilter === 'listening' && !isListeningMistake) return false;
+      if (mistakeFilter === 'reading' && !isReadingMistake) return false;
+      if (mistakeFilter === 'both' && !(isListeningMistake && isReadingMistake)) return false;
+    }
+
     if (!searchTerm) return true;
     const term = searchTerm.toLowerCase();
     return w.word.toLowerCase().includes(term) || w.meaning.toLowerCase().includes(term);
@@ -31,7 +46,7 @@ export function WordGrid({ words, activeTopicId, onAddWord, onEditWord, searchTe
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-md md:gap-lg auto-rows-max">
           {filteredWords.map(word => (
-            <WordCard key={word.id} word={word} onEdit={onEditWord} viewMode={viewMode} />
+            <WordCard key={word.id} word={word} onEdit={onEditWord} viewMode={viewMode} settings={settings} />
           ))}
         </div>
       )}

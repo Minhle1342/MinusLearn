@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Volume2, Play, RotateCcw, Check, X, CheckCircle2, XCircle } from 'lucide-react';
 import { useLocalStorage } from '../hooks/useLocalStorage';
+import { speakEnglishText } from '../utils/speech';
 
-export function ListeningPractice({ words, activeTopicId, topics }) {
+export function ListeningPractice({ words, activeTopicId, topics, settings }) {
   const [testState, setTestState] = useState('setup'); // 'setup', 'playing', 'results'
   const [wordCount, setWordCount] = useState(10);
   const [shuffledWords, setShuffledWords] = useState([]);
@@ -37,12 +38,7 @@ export function ListeningPractice({ words, activeTopicId, topics }) {
   };
 
   const speak = (text) => {
-    if (!window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'en-US';
-    utterance.rate = 0.9;
-    window.speechSynthesis.speak(utterance);
+    speakEnglishText(text, settings?.speechVoiceURI, { rate: 0.9 });
   };
 
   const handleStart = (reviewMode = false) => {
