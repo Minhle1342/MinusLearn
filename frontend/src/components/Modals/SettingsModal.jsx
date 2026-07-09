@@ -194,30 +194,6 @@ export function SettingsModal({ isOpen, onClose, settings, onSaveSettings }) {
                       <option value="lykon/dreamshaper">lykon/dreamshaper</option>
                     </select>
                   </div>
-
-                  <div className="border-t border-hairline pt-4 mt-2 flex flex-col gap-4">
-                    <div>
-                      <h4 className="text-body-md font-semibold text-on-surface">Speech Recognition</h4>
-                      <p className="text-body-sm text-on-surface-variant">
-                        Luyen noi hien dung Web Speech API cua trinh duyet de bo qua toan bo buoc lay API key va region.
-                      </p>
-                    </div>
-
-                    <div className="flex flex-col gap-2">
-                      <label className="text-body-sm font-semibold text-on-surface">Speaking Assessment Mode</label>
-                      <select
-                        value={localSettings.speakingAssessmentMode || 'web-speech'}
-                        onChange={e => setLocalSettings({ ...localSettings, speakingAssessmentMode: e.target.value })}
-                        className="w-full px-3 py-2 bg-surface-container-lowest border border-outline-variant rounded-lg focus:ring-2 focus:ring-primary outline-none text-sm"
-                      >
-                        <option value="web-speech">Web Speech API (No API key)</option>
-                      </select>
-                    </div>
-
-                    <div className="rounded-xl border border-outline-variant bg-surface p-4 text-body-sm text-on-surface-variant">
-                      Chi can mo MinusLearn bang Chrome hoac Edge, cho phep microphone, roi bam ghi am trong trang Luyen noi.
-                    </div>
-                  </div>
                 </div>
               </div>
             )}

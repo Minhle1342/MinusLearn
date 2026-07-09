@@ -4,14 +4,14 @@ import { GEMINI_DEFAULT_KEY, GEMINI_DEFAULT_MODEL } from './services/api';
 
 import { TopNavBar } from './components/TopNavBar';
 import { Sidebar } from './components/Sidebar';
-import { WordGrid } from './components/WordGrid';
+import { WordGrid } from './components/page/WordGrid';
 import { TopicModal } from './components/Modals/TopicModal';
 import { WordModal } from './components/Modals/WordModal';
 import { SettingsModal } from './components/Modals/SettingsModal';
-import { ListeningPractice } from './components/ListeningPractice';
-import { ReadingPractice } from './components/ReadingPractice';
-import { SpacedReview } from './components/SpacedReview';
-import { SpeakingPractice } from './components/SpeakingPractice';
+import { ListeningPractice } from './components/page/ListeningPractice';
+import { ReadingPractice } from './components/page/ReadingPractice';
+import { SpacedReview } from './components/page/SpacedReview';
+import { SpeakingPractice } from './components/page/SpeakingPractice';
 
 function App() {
   const [topics, setTopics] = useLocalStorage('minuslearn_topics', [
@@ -263,11 +263,12 @@ function App() {
           ) : activePage === 'speaking' ? (
             <div className="flex-1 overflow-y-auto bg-canvas-soft">
               <SpeakingPractice
-                words={words}
-                activeTopicId={activeTopicId}
-                topics={topics}
-                onOpenSettings={() => setIsSettingsModalOpen(true)}
-              />
+                  words={words}
+                  activeTopicId={activeTopicId}
+                  topics={topics}
+                  settings={settings}
+                  onOpenSettings={() => setIsSettingsModalOpen(true)}
+                />
             </div>
           ) : activePage === 'review' ? (
             <div className="flex-1 overflow-y-auto bg-canvas-soft">

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Volume2, Edit2 } from 'lucide-react';
-import { speakEnglishText } from '../utils/speech';
+import { speakEnglishText } from '../../utils/speech';
 
 export function WordCard({ word, onEdit, viewMode = 'card', settings }) {
   const [isFlipped, setIsFlipped] = useState(false);
@@ -17,23 +17,23 @@ export function WordCard({ word, onEdit, viewMode = 'card', settings }) {
 
   if (viewMode === 'flashcard') {
     return (
-      <div 
+      <div
         className="group relative bg-transparent h-72 [perspective:1000px] cursor-pointer"
         onClick={() => setIsFlipped(!isFlipped)}
       >
         <div className={`relative w-full h-full transition-all duration-500 [transform-style:preserve-3d] ${isFlipped ? '[transform:rotateY(180deg)]' : ''}`}>
-          
+
           {/* Front Face */}
           <div className="absolute inset-0 [backface-visibility:hidden] bg-surface border border-hairline rounded-[12px] shadow-sm flex flex-col items-center justify-center p-xl hover:shadow-md transition-shadow">
             <h3 className="font-title text-[36px] text-on-surface text-center mb-lg leading-tight">{word.word}</h3>
-            
-            <button 
+
+            <button
               onClick={speak}
               className="w-12 h-12 bg-surface-container-lowest border border-hairline rounded-full flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-surface-container transition-colors shadow-sm"
             >
               <Volume2 size={24} />
             </button>
-            
+
             <div className="absolute top-sm right-sm opacity-0 group-hover:opacity-100 transition-opacity">
               <button onClick={handleEditClick} className="w-8 h-8 bg-surface-container-low rounded-full flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-surface-container">
                 <Edit2 size={14} />
@@ -52,7 +52,7 @@ export function WordCard({ word, onEdit, viewMode = 'card', settings }) {
             ) : (
               <div className="absolute inset-0 bg-surface z-0"></div>
             )}
-            
+
             <div className={`relative z-20 flex flex-col gap-sm items-center text-center ${word.imageUrl ? 'text-white' : 'text-on-surface'}`}>
               <div className="flex flex-col items-center gap-1">
                 <h3 className={`font-title text-title ${word.imageUrl ? 'text-white' : 'text-on-surface'}`}>{word.word}</h3>
@@ -62,7 +62,7 @@ export function WordCard({ word, onEdit, viewMode = 'card', settings }) {
                   </span>
                 )}
               </div>
-              
+
               <p className={`font-body-lg text-lg line-clamp-4 mt-2 ${word.imageUrl ? 'text-white/90' : 'text-on-surface-variant'}`}>
                 {word.meaning}
               </p>
@@ -90,7 +90,7 @@ export function WordCard({ word, onEdit, viewMode = 'card', settings }) {
 
   // DEFAULT: Card View
   return (
-    <div 
+    <div
       className="group relative bg-canvas border border-hairline rounded-[12px] overflow-hidden hover:shadow-md transition-all duration-300 ease-in-out hover:-translate-y-1 flex flex-col"
     >
       <div className="h-40 w-full overflow-hidden bg-surface-container-lowest relative cursor-pointer" onClick={handleEditClick}>
@@ -101,8 +101,8 @@ export function WordCard({ word, onEdit, viewMode = 'card', settings }) {
             <span className="text-sm">No image</span>
           </div>
         )}
-        
-        <button 
+
+        <button
           onClick={speak}
           className="absolute bottom-sm right-sm w-8 h-8 bg-surface/80 backdrop-blur-md rounded-full flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-surface transition-colors shadow-sm opacity-0 group-hover:opacity-100 z-10"
         >
@@ -117,7 +117,7 @@ export function WordCard({ word, onEdit, viewMode = 'card', settings }) {
             {word.phonetic}
           </span>
         </div>
-        
+
         <p className="font-body-md text-body-md text-on-surface-variant line-clamp-2">
           {word.meaning}
         </p>

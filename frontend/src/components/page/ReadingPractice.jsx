@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BookOpen, CheckCircle2, XCircle } from 'lucide-react';
-import { useLocalStorage } from '../hooks/useLocalStorage';
+import { useLocalStorage } from '../../hooks/useLocalStorage';
 
 export function ReadingPractice({ words, activeTopicId, topics }) {
   const [testState, setTestState] = useState('setup'); // setup, playing, results
@@ -10,7 +10,7 @@ export function ReadingPractice({ words, activeTopicId, topics }) {
   const [showHint, setShowHint] = useState(false);
   const [toast, setToast] = useState(null);
   const [results, setResults] = useState([]);
-  
+
   const [mistakes, setMistakes] = useLocalStorage('minuslearn_reading_mistakes', {});
 
   const topicWords = words.filter(w => w.topicId === activeTopicId);
@@ -37,38 +37,38 @@ export function ReadingPractice({ words, activeTopicId, topics }) {
     } else {
       if (wordCount < 1 || wordCount > topicWords.length) return;
     }
-    
+
     // Pick words for questions
     const shuffled = [...sourceWords].sort(() => 0.5 - Math.random());
     const selected = shuffled.slice(0, selectedCount);
-    
+
     // Generate questions with 4 options
     const questions = selected.map(word => {
       // Find 3 other random words
       const otherWords = words.filter(w => w.id !== word.id).sort(() => 0.5 - Math.random()).slice(0, 3);
       // Combine and shuffle options
       const options = [word, ...otherWords].sort(() => 0.5 - Math.random());
-      
+
       // Replace word in example with blanks (using regex case insensitive)
       let exampleWithBlank = word.example || '';
       if (exampleWithBlank) {
-         const regex = new RegExp(`\\b${word.word}\\b`, 'gi');
-         if (regex.test(exampleWithBlank)) {
-            exampleWithBlank = exampleWithBlank.replace(regex, '____');
-         } else {
-            // Fallback: simple replace if no boundary match
-            const simpleRegex = new RegExp(word.word, 'gi');
-            exampleWithBlank = exampleWithBlank.replace(simpleRegex, '____');
-         }
+        const regex = new RegExp(`\\b${word.word}\\b`, 'gi');
+        if (regex.test(exampleWithBlank)) {
+          exampleWithBlank = exampleWithBlank.replace(regex, '____');
+        } else {
+          // Fallback: simple replace if no boundary match
+          const simpleRegex = new RegExp(word.word, 'gi');
+          exampleWithBlank = exampleWithBlank.replace(simpleRegex, '____');
+        }
       }
-      
+
       return {
         word,
         exampleWithBlank,
         options
       };
     });
-    
+
     setShuffledQuestions(questions);
     setCurrentIndex(0);
     setResults([]);
@@ -143,19 +143,19 @@ export function ReadingPractice({ words, activeTopicId, topics }) {
           <div className="w-24 h-24 bg-accent-teal/10 rounded-full flex items-center justify-center mb-xl shadow-inner border border-accent-teal/20">
             <BookOpen size={48} className="text-accent-teal" />
           </div>
-          
+
           <h2 className="font-display-2 text-display-2 text-ink mb-sm tracking-tight">Đọc - hiểu</h2>
           <p className="font-body-md text-body-md text-ink-muted mb-xxl">
-            Chủ đề <span className="font-bold text-ink px-1">{currentTopic?.name}</span> hiện có {topicWords.length} từ vựng. <br/>Sẵn sàng đọc hiểu chưa?
+            Chủ đề <span className="font-bold text-ink px-1">{currentTopic?.name}</span> hiện có {topicWords.length} từ vựng. <br />Sẵn sàng đọc hiểu chưa?
           </p>
 
           <div className="w-full text-left mb-xxl bg-canvas-soft p-lg rounded-[12px] border border-hairline">
             <label className="block font-eyebrow text-eyebrow text-primary uppercase mb-sm tracking-wide">
               Số lượng từ muốn kiểm tra
             </label>
-            <input 
-              type="number" 
-              min="1" 
+            <input
+              type="number"
+              min="1"
               max={topicWords.length}
               value={wordCount}
               onChange={(e) => setWordCount(parseInt(e.target.value) || 1)}
@@ -164,14 +164,14 @@ export function ReadingPractice({ words, activeTopicId, topics }) {
           </div>
 
           <div className="flex gap-sm w-full">
-            <button 
+            <button
               onClick={() => handleStart(false)}
               className="flex-1 bg-primary text-on-primary font-button text-button py-md rounded-full shadow-md hover:bg-primary-active hover:shadow-lg hover:-translate-y-0.5 transition-all active:translate-y-0 active:shadow-sm"
             >
               Bắt đầu kiểm tra
             </button>
             {wrongWordsInTopic.length > 0 && (
-              <button 
+              <button
                 onClick={() => handleStart(true)}
                 className="flex-1 bg-error text-surface font-button text-button py-md rounded-full shadow-md hover:bg-error/90 hover:shadow-lg hover:-translate-y-0.5 transition-all active:translate-y-0 active:shadow-sm"
               >
@@ -191,7 +191,7 @@ export function ReadingPractice({ words, activeTopicId, topics }) {
               <span>{currentIndex + 1} / {shuffledQuestions.length}</span>
             </div>
             <div className="h-3 w-full bg-hairline rounded-full overflow-hidden shadow-inner">
-              <div 
+              <div
                 className="h-full bg-primary transition-all duration-500 ease-out"
                 style={{ width: `${((currentIndex) / shuffledQuestions.length) * 100}%` }}
               ></div>
@@ -206,7 +206,7 @@ export function ReadingPractice({ words, activeTopicId, topics }) {
             </p>
 
             <div className="w-full bg-canvas-soft border-2 border-hairline rounded-[12px] p-lg font-heading-2 text-heading-2 text-ink text-center mb-xl shadow-inner">
-               {shuffledQuestions[currentIndex].exampleWithBlank || "____"}
+              {shuffledQuestions[currentIndex].exampleWithBlank || "____"}
             </div>
 
             {showHint && (
@@ -218,21 +218,21 @@ export function ReadingPractice({ words, activeTopicId, topics }) {
             )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-md w-full mb-lg">
-               {shuffledQuestions[currentIndex].options.map((opt, i) => (
-                  <button
-                     key={i}
-                     onClick={() => handleSelectOption(opt)}
-                     className="w-full bg-surface border-2 border-hairline rounded-[12px] p-md font-title text-title text-ink hover:border-primary hover:bg-primary/5 transition-colors active:scale-[0.98] shadow-sm text-left flex items-center group"
-                  >
-                     <span className="w-8 h-8 rounded-full bg-surface-container-low flex items-center justify-center font-bold text-primary mr-md shadow-sm group-hover:bg-primary group-hover:text-surface transition-colors">
-                        {['A', 'B', 'C', 'D'][i]}
-                     </span>
-                     {opt.word}
-                  </button>
-               ))}
+              {shuffledQuestions[currentIndex].options.map((opt, i) => (
+                <button
+                  key={i}
+                  onClick={() => handleSelectOption(opt)}
+                  className="w-full bg-surface border-2 border-hairline rounded-[12px] p-md font-title text-title text-ink hover:border-primary hover:bg-primary/5 transition-colors active:scale-[0.98] shadow-sm text-left flex items-center group"
+                >
+                  <span className="w-8 h-8 rounded-full bg-surface-container-low flex items-center justify-center font-bold text-primary mr-md shadow-sm group-hover:bg-primary group-hover:text-surface transition-colors">
+                    {['A', 'B', 'C', 'D'][i]}
+                  </span>
+                  {opt.word}
+                </button>
+              ))}
             </div>
 
-            <button 
+            <button
               onClick={() => setShowHint(true)}
               disabled={showHint}
               className="w-full bg-surface-container-high text-on-surface rounded-full py-md px-lg font-title text-title hover:bg-surface-container-highest transition-all active:scale-[0.98] shadow-sm disabled:opacity-50 disabled:pointer-events-none"
@@ -248,9 +248,9 @@ export function ReadingPractice({ words, activeTopicId, topics }) {
           <div className="w-24 h-24 bg-accent-green/10 rounded-full flex items-center justify-center mb-xl shadow-inner border border-accent-green/20">
             <CheckCircle2 size={48} className="text-accent-green" />
           </div>
-          
+
           <h2 className="font-display-2 text-display-2 text-ink mb-sm">Kết quả</h2>
-          
+
           <div className="flex gap-lg mb-xxl">
             <div className="text-center">
               <div className="font-display-1 text-display-1 text-accent-green">
@@ -284,14 +284,14 @@ export function ReadingPractice({ words, activeTopicId, topics }) {
           </div>
 
           <div className="flex gap-sm w-full">
-            <button 
+            <button
               onClick={() => setTestState('setup')}
               className="flex-1 bg-surface-container-high text-on-surface font-button text-button py-md rounded-full shadow-sm hover:bg-surface-container-highest transition-all active:translate-y-0"
             >
               Làm lại
             </button>
             {wrongWordsInTopic.length > 0 && (
-              <button 
+              <button
                 onClick={() => handleStart(true)}
                 className="flex-1 bg-error text-surface font-button text-button py-md rounded-full shadow-sm hover:bg-error/90 transition-all active:translate-y-0"
               >

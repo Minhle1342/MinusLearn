@@ -1,7 +1,7 @@
 import React from 'react';
 import { WordCard } from './WordCard';
 import { BookOpen, Plus } from 'lucide-react';
-import { useLocalStorage } from '../hooks/useLocalStorage';
+import { useLocalStorage } from '../../hooks/useLocalStorage';
 
 export function WordGrid({ words, activeTopicId, onAddWord, onEditWord, searchTerm, viewMode, settings, mistakeFilter }) {
   const [listeningMistakes] = useLocalStorage('minuslearn_mistakes', {});
@@ -9,11 +9,11 @@ export function WordGrid({ words, activeTopicId, onAddWord, onEditWord, searchTe
 
   const filteredWords = words.filter(w => {
     if (w.topicId !== activeTopicId) return false;
-    
+
     if (mistakeFilter && mistakeFilter !== 'none') {
       const isListeningMistake = !!listeningMistakes[w.id];
       const isReadingMistake = !!readingMistakes[w.id];
-      
+
       if (mistakeFilter === 'any' && !isListeningMistake && !isReadingMistake) return false;
       if (mistakeFilter === 'listening' && !isListeningMistake) return false;
       if (mistakeFilter === 'reading' && !isReadingMistake) return false;
@@ -36,7 +36,7 @@ export function WordGrid({ words, activeTopicId, onAddWord, onEditWord, searchTe
           <p className="font-body-md text-body-md text-on-surface-variant max-w-md mb-lg">
             Hãy bắt đầu xây dựng bộ từ vựng cá nhân của bạn. Thêm từ mới, sắp xếp chúng theo chủ đề và chinh phục một ngôn ngữ mới.
           </p>
-          <button 
+          <button
             onClick={onAddWord}
             className="bg-primary text-on-primary px-lg py-sm rounded-full font-button text-button hover:bg-primary-active transition-colors"
           >

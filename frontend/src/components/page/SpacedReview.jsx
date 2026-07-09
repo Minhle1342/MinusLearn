@@ -7,8 +7,8 @@ import {
   getDueWords,
   getNextDueDate,
   initSRState,
-} from '../utils/spacedRepetition';
-import { speakEnglishText } from '../utils/speech';
+} from '../../utils/spacedRepetition';
+import { speakEnglishText } from '../../utils/speech';
 
 export function SpacedReview({ words, activeTopicId, topics, srData, setSrData, settings }) {
   const [phase, setPhase] = useState('setup'); // 'setup' | 'reviewing' | 'summary'

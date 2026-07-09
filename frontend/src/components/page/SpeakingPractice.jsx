@@ -12,7 +12,9 @@ import {
   createPronunciationAssessmentSession,
   FALLBACK_SIMILARITY_THRESHOLD,
   hasSpeechRecognitionSupport,
-} from '../services/speechAssessment';
+} from '../../services/speechAssessment';
+import { useLocalStorage } from '../../hooks/useLocalStorage';
+import { speakEnglishText } from '../../utils/speech';
 
 function shuffleWords(words) {
   return [...words].sort(() => 0.5 - Math.random());
@@ -22,7 +24,7 @@ function formatScore(score) {
   return typeof score === 'number' ? Math.round(score) : '-';
 }
 
-export function SpeakingPractice({ words, activeTopicId, topics, onOpenSettings }) {
+export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpenSettings }) {
   const [phase, setPhase] = useState('setup');
   const [wordCount, setWordCount] = useState(10);
   const [practiceQueue, setPracticeQueue] = useState([]);
@@ -33,6 +35,7 @@ export function SpeakingPractice({ words, activeTopicId, topics, onOpenSettings 
   const [sessionResults, setSessionResults] = useState([]);
   const [errorMessage, setErrorMessage] = useState('');
   const sessionRef = useRef(null);
+  const [speakingMistakes, setSpeakingMistakes] = useLocalStorage('minuslearn_speaking_mistakes', {});
 
   const currentTopic = topics.find(topic => topic.id === activeTopicId);
   const topicWords = useMemo(
@@ -45,6 +48,11 @@ export function SpeakingPractice({ words, activeTopicId, topics, onOpenSettings 
   );
   const hasSpeechRecognition = hasSpeechRecognitionSupport();
   const currentWord = practiceQueue[currentIndex];
+
+  const topicMistakes = useMemo(
+    () => speakableWords.filter(word => speakingMistakes[word.id]),
+    [speakableWords, speakingMistakes]
+  );
 
   useEffect(() => {
     setWordCount(Math.max(1, speakableWords.length || 1));
@@ -132,6 +140,19 @@ export function SpeakingPractice({ words, activeTopicId, topics, onOpenSettings 
   };
 
   const handleNext = () => {
+    const currentEntry = sessionResults[sessionResults.length - 1];
+    if (currentEntry) {
+      setSpeakingMistakes(prev => {
+        const next = { ...prev };
+        if (currentEntry.isPass) {
+          delete next[currentEntry.word.id];
+        } else {
+          next[currentEntry.word.id] = true;
+        }
+        return next;
+      });
+    }
+
     if (currentIndex + 1 < practiceQueue.length) {
       setCurrentIndex(currentIndex + 1);
       setLiveTranscript('');
@@ -214,13 +235,33 @@ export function SpeakingPractice({ words, activeTopicId, topics, onOpenSettings 
             </div>
           )}
 
-          <button
-            onClick={handleStartPractice}
-            disabled={!hasSpeechRecognition}
-            className="w-full bg-primary text-on-primary font-button text-button py-md rounded-full shadow-md hover:bg-primary-active hover:shadow-lg hover:-translate-y-0.5 transition-all active:translate-y-0 active:shadow-sm disabled:opacity-50 disabled:pointer-events-none"
-          >
-            Bắt đầu
-          </button>
+          <div className="flex gap-sm w-full">
+            <button
+              onClick={handleStartPractice}
+              disabled={!hasSpeechRecognition}
+              className="flex-1 bg-primary text-on-primary font-button text-button py-md rounded-full shadow-md hover:bg-primary-active hover:shadow-lg hover:-translate-y-0.5 transition-all active:translate-y-0 active:shadow-sm disabled:opacity-50 disabled:pointer-events-none"
+            >
+              Bắt đầu
+            </button>
+            {topicMistakes.length > 0 && (
+              <button
+                onClick={() => {
+                  if (!hasSpeechRecognition || topicMistakes.length === 0) return;
+                  setPracticeQueue(shuffleWords(topicMistakes));
+                  setCurrentIndex(0);
+                  setLiveTranscript('');
+                  setCurrentResult(null);
+                  setSessionResults([]);
+                  setErrorMessage('');
+                  setPhase('playing');
+                }}
+                disabled={!hasSpeechRecognition}
+                className="flex-1 bg-error-container text-on-error-container border border-error/20 font-button text-button py-md rounded-full shadow-sm hover:bg-error/20 hover:-translate-y-0.5 transition-all active:translate-y-0 disabled:opacity-50 disabled:pointer-events-none"
+              >
+                Ôn lại {topicMistakes.length} câu sai
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -255,6 +296,13 @@ export function SpeakingPractice({ words, activeTopicId, topics, onOpenSettings 
             )}
             <p className="font-heading-2 text-heading-2 text-ink leading-relaxed bg-canvas-soft border border-hairline rounded-[12px] p-lg">
               {currentWord.example}
+              <button
+                onClick={() => speakEnglishText(currentWord.example, settings?.voice)}
+                className="inline-flex items-center justify-center ml-sm align-middle p-1 rounded-full text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-colors"
+                title="Nghe câu ví dụ"
+              >
+                <Volume2 size={28} />
+              </button>
             </p>
           </div>
 
@@ -262,11 +310,10 @@ export function SpeakingPractice({ words, activeTopicId, topics, onOpenSettings 
             type="button"
             onClick={isRecording ? handleStopRecording : handleStartRecording}
             disabled={Boolean(currentResult)}
-            className={`w-32 h-32 rounded-full flex items-center justify-center mb-lg shadow-md transition-all active:scale-95 border ${
-              isRecording
+            className={`w-32 h-32 rounded-full flex items-center justify-center mb-lg shadow-md transition-all active:scale-95 border ${isRecording
                 ? 'bg-error text-on-error border-error animate-pulse'
                 : 'bg-primary text-on-primary border-primary hover:bg-primary-active'
-            } disabled:opacity-50 disabled:pointer-events-none`}
+              } disabled:opacity-50 disabled:pointer-events-none`}
             title={isRecording ? 'Dừng' : 'Ghi âm'}
           >
             {isRecording ? <Square size={48} fill="currentColor" /> : <Mic size={56} />}
