@@ -1,0 +1,35 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.local
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Build outputs
+dist/
+build/
+coverage/
+.vite/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

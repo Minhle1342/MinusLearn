@@ -1,0 +1,57 @@
+import React from 'react';
+import { Menu, Settings } from 'lucide-react';
+
+export function TopNavBar({ wordCount, activePage, setActivePage, onOpenDrawer, onOpenSettings }) {
+  return (
+    <nav className="sticky top-0 w-full z-50 flex justify-between items-center px-lg h-[56px] bg-canvas border-b border-hairline flat no shadows">
+      <div className="flex-1 flex items-center gap-md">
+        <button
+          className="md:hidden p-xs rounded-lg hover:bg-surface-container-low text-on-surface-variant transition-colors"
+          onClick={onOpenDrawer}
+        >
+          <Menu size={24} />
+        </button>
+        <span className="text-heading-1 font-heading-1 text-primary hidden sm:block">MinusLearn</span>
+      </div>
+
+      <div className="flex flex-1 justify-center h-full items-center gap-sm">
+        <button
+          onClick={() => setActivePage('vocabulary')}
+          className={`h-[56px] px-sm font-button text-button transition-colors border-b-2 ${activePage === 'vocabulary' ? 'text-primary border-primary' : 'text-on-surface-variant border-transparent hover:text-on-surface'}`}
+        >
+          Từ vựng
+        </button>
+        <button
+          onClick={() => setActivePage('listening')}
+          className={`h-[56px] px-sm font-button text-button transition-colors border-b-2 ${activePage === 'listening' ? 'text-primary border-primary' : 'text-on-surface-variant border-transparent hover:text-on-surface'}`}
+        >
+          Luyện nghe
+        </button>
+        <button
+          onClick={() => setActivePage('reading')}
+          className={`h-[56px] px-sm font-button text-button transition-colors border-b-2 ${activePage === 'reading' ? 'text-primary border-primary' : 'text-on-surface-variant border-transparent hover:text-on-surface'}`}
+        >
+          Đọc - hiểu
+        </button>
+        <button
+          onClick={() => setActivePage('review')}
+          className={`h-[56px] px-sm font-button text-button transition-colors border-b-2 ${activePage === 'review' ? 'text-primary border-primary' : 'text-on-surface-variant border-transparent hover:text-on-surface'}`}
+        >
+          Ôn ngắt quảng
+        </button>
+      </div>
+
+      <div className="flex-1 flex justify-end items-center gap-md">
+        <div className="font-body-sm text-body-sm text-on-surface-variant hidden md:block">
+          {wordCount} Words
+        </div>
+        <button
+          onClick={onOpenSettings}
+          className="p-xs rounded-lg hover:bg-surface-container-low text-on-surface-variant transition-colors cursor-pointer active:opacity-80"
+        >
+          <Settings size={24} />
+        </button>
+      </div>
+    </nav>
+  );
+}

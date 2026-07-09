@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "MinusLearn Clipper",
+  "version": "1.0",
+  "description": "Highlight words and send them to MinusLearn AI Bulk Add",
+  "permissions": [
+    "contextMenus",
+    "storage"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "MinusLearn Clipper"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://localhost:5173/*"],
+      "js": ["content.js"]
+    }
+  ]
+}

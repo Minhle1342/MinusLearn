@@ -1,0 +1,114 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --font-primary: 'Inter', sans-serif;
+    --font-size-scale: 1;
+
+    /* Base theme (current) */
+    --color-primary: #005db2;
+    --color-primary-active: #005bab;
+    --color-on-primary: #ffffff;
+    --color-canvas: #ffffff;
+    --color-canvas-soft: #f6f5f4;
+    --color-surface: #f9f9ff;
+    --color-surface-container-low: #f1f3fc;
+    --color-surface-container-highest: #e0e2eb;
+    --color-surface-container-lowest: #ffffff;
+    --color-ink: #000000;
+    --color-ink-secondary: #31302e;
+    --color-ink-muted: #615d59;
+    --color-ink-faint: #a39e98;
+    --color-on-surface: #181c22;
+    --color-on-surface-variant: #414753;
+    --color-hairline: #e6e6e6;
+    --color-outline-variant: #c1c6d5;
+  }
+
+  body.theme-white-blue {
+    --color-canvas-soft: #f0f7ff;
+    --color-canvas: #ffffff;
+    --color-surface: #ffffff;
+    --color-ink: #0a2540;
+    --color-ink-secondary: #243647;
+    --color-ink-muted: #425466;
+    --color-on-surface: #0a2540;
+    --color-primary: #0075de;
+  }
+
+  body.theme-tokyo {
+    --color-canvas-soft: #1a1b26;
+    --color-canvas: #16161e;
+    --color-surface: #1f2335;
+    --color-ink: #c0caf5;
+    --color-ink-secondary: #9aa5ce;
+    --color-ink-muted: #565f89;
+    --color-ink-faint: #414868;
+    --color-hairline: #292e42;
+    --color-surface-container-low: #24283b;
+    --color-surface-container-highest: #292e42;
+    --color-surface-container-lowest: #16161e;
+    --color-on-surface: #c0caf5;
+    --color-on-surface-variant: #a9b1d6;
+    --color-outline-variant: #414868;
+    --color-primary: #7aa2f7;
+    --color-primary-active: #3d59a1;
+    --color-on-primary: #15161e;
+  }
+
+  body.font-style-serif {
+    --font-primary: 'Merriweather', 'Georgia', serif;
+  }
+
+  body.font-style-monospace {
+    --font-primary: 'Fira Code', 'Consolas', monospace;
+  }
+
+  body.size-small {
+    --font-size-scale: 0.85;
+  }
+
+  body.size-large {
+    --font-size-scale: 1.15;
+  }
+
+  body {
+    @apply bg-canvas text-on-surface h-screen overflow-hidden flex flex-col font-body-md;
+    font-family: var(--font-primary);
+  }
+}
+
+@layer utilities {
+  .shimmer {
+    background: linear-gradient(
+      90deg,
+      theme('colors.surface-container-highest') 0px,
+      theme('colors.surface-container-lowest') 40px,
+      theme('colors.surface-container-highest') 80px
+    );
+    background-size: 600px;
+    animation: shimmer 2s infinite linear;
+  }
+
+  @keyframes shimmer {
+    0% { background-position: -100% 0; }
+    100% { background-position: 100% 0; }
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-surface-dim rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-outline-variant;
+  }
+}
