@@ -1,113 +1,113 @@
 # MinusLearn
 
-MinusLearn la mot website hoc tu vung tieng Anh theo chu de, tap trung vao viec them nhanh tu moi va on tap bang nhieu che do khac nhau. Du an hien tai gom mot frontend React + Vite va mot Chrome extension nho de gui nhanh doan text vao man hinh them tu bang AI.
+MinusLearn is an English vocabulary learning website organized by topic. It is designed to help users add new words quickly and review them through multiple practice modes. The current project includes a React + Vite frontend and a lightweight Chrome extension that can send highlighted text into the AI bulk-add flow.
 
-## Tinh nang hien tai
+## Current features
 
-- Quan ly tu vung theo chu de voi sidebar rieng cho tung topic.
-- Them tu vung thu cong gom tu, phien am, nghia, cau vi du va anh minh hoa.
-- Them hang loat bang AI tu mot doan text hoac danh sach tu.
-- Tu dong tao anh minh hoa cho tu vung khi cau hinh model anh ho tro.
-- Tim kiem tu vung va chuyen doi giua card view va flashcard view.
-- Luyen nghe bang Speech Synthesis, nhap dap an, luu danh sach cau sai de on lai.
-- Luyen doc hieu bang cau dien tu voi 4 lua chon.
-- On tap bang spaced repetition voi co che danh gia `Quen`, `Kho`, `Tot`, `De`.
-- Theo doi streak hoc tap dua tren lich su on tap.
-- Dong bo topic voi extension va nhan text clip qua URL param de mo san modal AI.
+- Topic-based vocabulary management with a dedicated sidebar for each topic.
+- Manual word creation with word, phonetic, meaning, example sentence, and image support.
+- AI-powered bulk import from a text block or word list.
+- Automatic illustration generation for vocabulary entries when an image model is configured.
+- Search support and switching between card view and flashcard view.
+- Listening practice using Speech Synthesis, answer input, and mistake tracking for later review.
+- Reading practice with fill-in-the-blank multiple-choice questions.
+- Spaced repetition review with `Forgot`, `Hard`, `Good`, and `Easy` ratings.
+- Study streak tracking based on review history.
+- Topic syncing with the extension and URL-parameter support to open the AI modal with prefilled text.
 
-## Cong nghe su dung
+## Tech stack
 
 - React 18
 - Vite 5
 - Tailwind CSS
 - Lucide React
-- LocalStorage de luu du lieu hoc tap tren trinh duyet
+- LocalStorage for browser-side learning data storage
 
-## Cau truc thu muc
+## Project structure
 
 ```text
-frontend/   Ung dung web chinh
-extension/  Chrome extension clip text vao MinusLearn
-.agent/     Tai lieu thiet ke va dinh huong giao dien
+frontend/   Main web application
+extension/  Chrome extension for sending clipped text to MinusLearn
+.agent/     Design notes and UI direction documents
 ```
 
-## Cach chay local
+## Run locally
 
-### 1. Cai dependencies
+### 1. Install dependencies
 
 ```bash
 cd frontend
 npm install
 ```
 
-### 2. Tao file moi truong
+### 2. Create the environment file
 
-Sao chep file mau:
+Copy the example file:
 
 ```bash
 cp .env.example .env
 ```
 
-Hoac tren Windows PowerShell:
+Or on Windows PowerShell:
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-Bien moi truong dang dung:
+Current environment variables:
 
 ```env
 VITE_GEMINI_DEFAULT_KEY=
 VITE_GEMINI_DEFAULT_MODEL=gemini-3.1-flash-lite-preview
 ```
 
-### 3. Chay dev server
+### 3. Start the dev server
 
 ```bash
 npm run dev
 ```
 
-Mac dinh Vite se chay tai `http://localhost:5173`.
+By default, Vite runs at `http://localhost:5173`.
 
-### 4. Build production
+### 4. Build for production
 
 ```bash
 npm run build
 ```
 
-## Cach su dung website
+## How to use the website
 
-1. Tao mot chu de moi trong sidebar.
-2. Them tu vung thu cong hoac mo tab AI de dan danh sach tu/cum tu.
-3. Cau hinh API key trong Settings neu muon dung tinh nang AI.
-4. Chuyen qua cac tab `Vocabulary`, `Listening`, `Reading`, `Review` de hoc.
-5. Theo doi cac tu sai va tien do on tap ngay trong ung dung.
+1. Create a new topic from the sidebar.
+2. Add vocabulary manually or open the AI tab to paste a word list or text block.
+3. Configure your API key in Settings if you want to use AI features.
+4. Switch between `Vocabulary`, `Listening`, `Reading`, and `Review` tabs to study.
+5. Track mistakes and review progress directly inside the app.
 
 ## Chrome extension
 
-Thu muc `extension/` chua mot extension don gian de gui text vao MinusLearn.
+The `extension/` folder contains a simple extension for sending highlighted text into MinusLearn.
 
-- Ten extension: `MinusLearn Clipper`
-- Muc dich: highlight text va day sang modal them tu bang AI
-- Pham vi hien tai: content script dang match `http://localhost:5173/*`
+- Extension name: `MinusLearn Clipper`
+- Purpose: highlight text and send it into the AI bulk-add modal
+- Current scope: the content script matches `http://localhost:5173/*`
 
-De cai dat thu cong tren Chrome:
+To install it manually in Chrome:
 
-1. Mo `chrome://extensions`
-2. Bat `Developer mode`
-3. Chon `Load unpacked`
-4. Tro toi thu muc `extension`
+1. Open `chrome://extensions`
+2. Enable `Developer mode`
+3. Click `Load unpacked`
+4. Select the `extension` folder
 
-## Luu y hien tai
+## Current notes
 
-- Du lieu hoc tap hien duoc luu o LocalStorage, chua co backend dong bo tai khoan.
-- API key duoc doc tu bien moi truong frontend hoac luu trong settings local cua nguoi dung.
-- File `frontend/.env` da duoc ignore de tranh commit thong tin nhay cam.
+- Learning data is currently stored in LocalStorage, and there is no backend account sync yet.
+- The API key is read from frontend environment variables or saved in the user's local settings.
+- `frontend/.env` is ignored to avoid committing sensitive data.
 
-## Trang thai du an
+## Project status
 
-Website hien da build thanh cong o moi truong local va co the tiep tuc mo rong theo cac huong:
+The website currently builds successfully in a local environment and can be extended further in areas such as:
 
-- Bo sung backend va dang nhap de dong bo du lieu
-- Hoan thien luong AI va xu ly loi tot hon
-- Mo rong extension cho nhieu domain hon
+- Adding a backend and authentication for data sync
+- Improving the AI workflow and error handling
+- Expanding extension support to more domains
