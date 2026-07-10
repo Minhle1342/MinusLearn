@@ -24,7 +24,7 @@ function formatScore(score) {
   return typeof score === 'number' ? Math.round(score) : '-';
 }
 
-export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpenSettings }) {
+export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpenSettings, setSrData }) {
   const [phase, setPhase] = useState('setup');
   const [wordCount, setWordCount] = useState(10);
   const [practiceQueue, setPracticeQueue] = useState([]);
@@ -159,6 +159,20 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
       setCurrentResult(null);
       setErrorMessage('');
       return;
+    }
+
+    if (setSrData) {
+      const now = Date.now();
+      setSrData(prev => {
+        const next = { ...prev };
+        sessionResults.forEach(r => {
+          next[r.word.id] = {
+            ...(next[r.word.id] || { interval: 0, ease: 2.5, step: 0 }),
+            lastReviewDate: now
+          };
+        });
+        return next;
+      });
     }
 
     setPhase('results');

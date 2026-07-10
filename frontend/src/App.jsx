@@ -12,6 +12,7 @@ import { ListeningPractice } from './components/page/ListeningPractice';
 import { ReadingPractice } from './components/page/ReadingPractice';
 import { SpacedReview } from './components/page/SpacedReview';
 import { SpeakingPractice } from './components/page/SpeakingPractice';
+import { ExamPage } from './components/page/ExamPage';
 
 function App() {
   const [topics, setTopics] = useLocalStorage('minuslearn_topics', [
@@ -250,6 +251,7 @@ function App() {
                 activeTopicId={activeTopicId}
                 topics={topics}
                 settings={settings}
+                setSrData={setSrData}
               />
             </div>
           ) : activePage === 'reading' ? (
@@ -258,6 +260,7 @@ function App() {
                 words={words}
                 activeTopicId={activeTopicId}
                 topics={topics}
+                setSrData={setSrData}
               />
             </div>
           ) : activePage === 'speaking' ? (
@@ -268,7 +271,19 @@ function App() {
                   topics={topics}
                   settings={settings}
                   onOpenSettings={() => setIsSettingsModalOpen(true)}
+                  setSrData={setSrData}
                 />
+            </div>
+          ) : activePage === 'exam' ? (
+            <div className="flex-1 overflow-y-auto bg-canvas-soft">
+              <ExamPage
+                words={words}
+                activeTopicId={activeTopicId}
+                topics={topics}
+                settings={settings}
+                setSrData={setSrData}
+                onOpenSettings={() => setIsSettingsModalOpen(true)}
+              />
             </div>
           ) : activePage === 'review' ? (
             <div className="flex-1 overflow-y-auto bg-canvas-soft">

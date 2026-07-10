@@ -3,13 +3,15 @@ import { Volume2, Play, RotateCcw, Check, X, CheckCircle2, XCircle } from 'lucid
 import { useLocalStorage } from '../../hooks/useLocalStorage';
 import { speakEnglishText } from '../../utils/speech';
 
-export function ListeningPractice({ words, activeTopicId, topics, settings }) {
+export function ListeningPractice({ words, activeTopicId, topics, settings, setSrData }) {
   const [testState, setTestState] = useState('setup'); // 'setup', 'playing', 'results'
+  const [testMode, setTestMode] = useState('typing'); // 'multiple_choice', 'typing'
   const [wordCount, setWordCount] = useState(10);
   const [shuffledWords, setShuffledWords] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [userInput, setUserInput] = useState('');
   const [results, setResults] = useState([]);
+  const [selectedOption, setSelectedOption] = useState(null);
 
   // Toast State: { message: string, type: 'success' | 'error' } | null
   const [toast, setToast] = useState(null);
@@ -56,25 +58,32 @@ export function ListeningPractice({ words, activeTopicId, topics, settings }) {
     const shuffled = [...sourceWords].sort(() => 0.5 - Math.random());
     const selected = shuffled.slice(0, selectedCount);
 
-    setShuffledWords(selected);
+    const questions = selected.map(word => {
+      const otherWords = words.filter(w => w.id !== word.id).sort(() => 0.5 - Math.random()).slice(0, 3);
+      const options = [word, ...otherWords].sort(() => 0.5 - Math.random());
+      return { word, options };
+    });
+
+    setShuffledWords(questions);
     setCurrentIndex(0);
     setResults([]);
     setUserInput('');
+    setSelectedOption(null);
     setTestState('playing');
     setToast(null);
     setShowHint(false);
 
     // Speak first word after a tiny delay to ensure UI updates
     setTimeout(() => {
-      speak(selected[0].word);
-      if (inputRef.current) inputRef.current.focus();
+      speak(questions[0].word.word);
+      if (testMode === 'typing' && inputRef.current) inputRef.current.focus();
     }, 300);
   };
 
   const handleNext = () => {
     if (!userInput.trim()) return;
 
-    const currentWord = shuffledWords[currentIndex];
+    const currentWord = shuffledWords[currentIndex].word;
     const isCorrect = userInput.trim().toLowerCase() === currentWord.word.toLowerCase();
 
     // Trigger feedback
@@ -111,12 +120,83 @@ export function ListeningPractice({ words, activeTopicId, topics, settings }) {
     if (currentIndex + 1 < shuffledWords.length) {
       setCurrentIndex(currentIndex + 1);
       setTimeout(() => {
-        speak(shuffledWords[currentIndex + 1].word);
+        speak(shuffledWords[currentIndex + 1].word.word);
         if (inputRef.current) inputRef.current.focus();
       }, 300);
     } else {
+      if (setSrData) {
+        const now = Date.now();
+        setSrData(prev => {
+          const next = { ...prev };
+          newResults.forEach(r => {
+            next[r.word.id] = {
+              ...(next[r.word.id] || { interval: 0, ease: 2.5, step: 0 }),
+              lastReviewDate: now
+            };
+          });
+          return next;
+        });
+      }
       setTestState('results');
     }
+  };
+
+  const handleSelectOption = (selectedOpt) => {
+    if (selectedOption) return;
+    
+    setSelectedOption(selectedOpt);
+
+    const currentWord = shuffledWords[currentIndex].word;
+    const isCorrect = selectedOpt.id === currentWord.id;
+
+    if (isCorrect) {
+      showToast('Chính xác!', 'success');
+      if (mistakes[currentWord.id]) {
+        const newMistakes = { ...mistakes };
+        delete newMistakes[currentWord.id];
+        setMistakes(newMistakes);
+      }
+      if (window.confetti) {
+        window.confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 }, colors: ['#1aae39', '#ff64c8', '#0075de', '#d6b6f6'] });
+      }
+    } else {
+      showToast(`Sai rồi! Đáp án: ${currentWord.word}`, 'error');
+      setMistakes({ ...mistakes, [currentWord.id]: true });
+    }
+
+    const newResults = [...results, {
+      word: currentWord,
+      userAnswer: selectedOpt.word,
+      isCorrect
+    }];
+
+    setResults(newResults);
+    setShowHint(false);
+
+    setTimeout(() => {
+      setSelectedOption(null);
+      if (currentIndex + 1 < shuffledWords.length) {
+        setCurrentIndex(currentIndex + 1);
+        setTimeout(() => {
+          speak(shuffledWords[currentIndex + 1].word.word);
+        }, 300);
+      } else {
+        if (setSrData) {
+          const now = Date.now();
+          setSrData(prev => {
+            const next = { ...prev };
+            newResults.forEach(r => {
+              next[r.word.id] = {
+                ...(next[r.word.id] || { interval: 0, ease: 2.5, step: 0 }),
+                lastReviewDate: now
+              };
+            });
+            return next;
+          });
+        }
+        setTestState('results');
+      }
+    }, 1500);
   };
 
   const handleKeyDown = (e) => {
@@ -161,9 +241,29 @@ export function ListeningPractice({ words, activeTopicId, topics, settings }) {
           </div>
 
           <h2 className="font-display-2 text-display-2 text-ink mb-sm tracking-tight">Luyện nghe</h2>
-          <p className="font-body-md text-body-md text-ink-muted mb-xxl">
+          <p className="font-body-md text-body-md text-ink-muted mb-xl">
             Chủ đề <span className="font-bold text-ink px-1">{currentTopic?.name}</span> hiện có {topicWords.length} từ vựng. <br />Sẵn sàng kiểm tra đôi tai của bạn chưa?
           </p>
+
+          <div className="w-full text-left mb-lg bg-canvas-soft p-lg rounded-[12px] border border-hairline">
+            <label className="block font-eyebrow text-eyebrow text-primary uppercase mb-sm tracking-wide">
+              Chế độ kiểm tra
+            </label>
+            <div className="flex gap-sm">
+              <button 
+                onClick={() => setTestMode('multiple_choice')}
+                className={`flex-1 py-sm rounded-[8px] font-title text-title transition-all border ${testMode === 'multiple_choice' ? 'bg-primary text-surface border-primary shadow-sm' : 'bg-surface text-ink hover:bg-surface-container-low border-hairline'}`}
+              >
+                Trắc nghiệm
+              </button>
+              <button 
+                onClick={() => setTestMode('typing')}
+                className={`flex-1 py-sm rounded-[8px] font-title text-title transition-all border ${testMode === 'typing' ? 'bg-primary text-surface border-primary shadow-sm' : 'bg-surface text-ink hover:bg-surface-container-low border-hairline'}`}
+              >
+                Nhập từ vựng
+              </button>
+            </div>
+          </div>
 
           <div className="w-full text-left mb-xxl bg-canvas-soft p-lg rounded-[12px] border border-hairline">
             <label className="block font-eyebrow text-eyebrow text-primary uppercase mb-sm tracking-wide">
@@ -220,7 +320,7 @@ export function ListeningPractice({ words, activeTopicId, topics, settings }) {
             <div className="absolute bottom-[-50px] left-[-50px] w-40 h-40 bg-accent-purple/5 rounded-full blur-2xl pointer-events-none"></div>
 
             <button
-              onClick={() => speak(shuffledWords[currentIndex].word)}
+              onClick={() => speak(shuffledWords[currentIndex].word.word)}
               className="w-32 h-32 bg-primary/5 rounded-full flex items-center justify-center mb-xl hover:bg-primary/10 transition-colors active:scale-90 text-primary shadow-sm border border-primary/20 relative group"
             >
               <div className="absolute inset-0 rounded-full bg-primary/20 animate-ping opacity-0 group-hover:opacity-100 transition-opacity"></div>
@@ -228,55 +328,138 @@ export function ListeningPractice({ words, activeTopicId, topics, settings }) {
             </button>
 
             <p className="font-title text-title text-ink-muted mb-lg text-center">
-              Nghe và gõ lại từ vựng bạn vừa nghe được
+              Nghe và {testMode === 'multiple_choice' ? 'chọn từ thích hợp' : 'gõ lại từ vựng bạn vừa nghe được'}
             </p>
 
-            <input
-              ref={inputRef}
-              type="text"
-              value={userInput}
-              onChange={(e) => setUserInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Gõ từ vựng vào đây..."
-              className="w-full text-center bg-canvas-soft border-2 border-hairline rounded-[12px] py-lg px-xl font-display-2 text-display-2 text-ink focus:outline-none focus:border-primary focus:bg-surface transition-all mb-xl placeholder:text-ink-faint"
-              autoComplete="off"
-              spellCheck="false"
-            />
+            {testMode === 'typing' ? (
+              <>
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={userInput}
+                  onChange={(e) => setUserInput(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Gõ từ vựng vào đây..."
+                  className="w-full text-center bg-canvas-soft border-2 border-hairline rounded-[12px] py-lg px-xl font-display-2 text-display-2 text-ink focus:outline-none focus:border-primary focus:bg-surface transition-all mb-xl placeholder:text-ink-faint"
+                  autoComplete="off"
+                  spellCheck="false"
+                />
 
-            {showHint && (
-              <div className="w-full text-left bg-surface-container-low border border-hairline rounded-[8px] p-md mb-xl animate-in fade-in duration-300">
-                <p className="font-title text-title text-ink mb-xs">
-                  <span className="font-bold">Nghĩa:</span> {shuffledWords[currentIndex].meaning}
-                </p>
-                {shuffledWords[currentIndex].exampleSentence && (
-                  <p className="font-body-md text-body-md text-ink-muted">
-                    <span className="font-bold">Ví dụ:</span> {shuffledWords[currentIndex].exampleSentence}
-                  </p>
+                {showHint && (
+                  <div className="w-full text-left bg-surface-container-low border border-hairline rounded-[8px] p-md mb-xl animate-in fade-in duration-300">
+                    <p className="font-title text-title text-ink mb-xs">
+                      <span className="font-bold">Nghĩa:</span> {shuffledWords[currentIndex].word.meaning}
+                    </p>
+                    {shuffledWords[currentIndex].word.exampleSentence && (
+                      <p className="font-body-md text-body-md text-ink-muted">
+                        <span className="font-bold">Ví dụ:</span> {shuffledWords[currentIndex].word.exampleSentence}
+                      </p>
+                    )}
+                    {shuffledWords[currentIndex].word.exampleTranslation && (
+                      <p className="font-body-md text-body-md text-ink-muted mt-xs">
+                        <span className="font-bold">Dịch:</span> {shuffledWords[currentIndex].word.exampleTranslation}
+                      </p>
+                    )}
+                  </div>
                 )}
-                {shuffledWords[currentIndex].exampleTranslation && (
-                  <p className="font-body-md text-body-md text-ink-muted mt-xs">
-                    <span className="font-bold">Dịch:</span> {shuffledWords[currentIndex].exampleTranslation}
-                  </p>
+
+                <div className="flex gap-sm w-full">
+                  <button
+                    onClick={() => setShowHint(true)}
+                    disabled={showHint}
+                    className="w-1/3 bg-surface-container-high text-on-surface rounded-full py-md px-lg font-title text-title hover:bg-surface-container-highest transition-all active:scale-[0.98] shadow-sm disabled:opacity-50 disabled:pointer-events-none"
+                  >
+                    Gợi ý
+                  </button>
+                  <button
+                    onClick={handleNext}
+                    disabled={!userInput.trim()}
+                    className="w-2/3 bg-primary text-on-primary rounded-full py-md px-lg font-title text-title hover:bg-primary-active transition-all active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none shadow-sm flex items-center justify-center gap-xs"
+                  >
+                    Tiếp tục
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                {showHint && (
+                  <div className="w-full text-left bg-surface-container-low border border-hairline rounded-[8px] p-md mb-xl animate-in fade-in duration-300">
+                    <p className="font-title text-title text-ink mb-xs">
+                      <span className="font-bold">Nghĩa:</span> {shuffledWords[currentIndex].word.meaning}
+                    </p>
+                    {shuffledWords[currentIndex].word.exampleSentence && (
+                      <p className="font-body-md text-body-md text-ink-muted">
+                        <span className="font-bold">Ví dụ:</span> {shuffledWords[currentIndex].word.exampleSentence}
+                      </p>
+                    )}
+                    {shuffledWords[currentIndex].word.exampleTranslation && (
+                      <p className="font-body-md text-body-md text-ink-muted mt-xs">
+                        <span className="font-bold">Dịch:</span> {shuffledWords[currentIndex].word.exampleTranslation}
+                      </p>
+                    )}
+                  </div>
                 )}
-              </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-md w-full mb-lg">
+                  {shuffledWords[currentIndex].options.map((opt, i) => {
+                    const isSelected = selectedOption && selectedOption.id === opt.id;
+                    const isCorrectAnswer = opt.id === shuffledWords[currentIndex].word.id;
+                    
+                    let borderClass = "border-hairline hover:border-primary hover:bg-primary/5";
+                    let bgClass = "bg-surface";
+                    let textClass = "text-ink";
+                    let badgeClass = "bg-surface-container-low text-primary group-hover:bg-primary group-hover:text-surface";
+                    
+                    if (selectedOption) {
+                      if (isCorrectAnswer) {
+                        borderClass = "border-accent-green";
+                        bgClass = "bg-accent-green/10";
+                        textClass = "text-accent-green";
+                        badgeClass = "bg-accent-green text-surface";
+                      } else if (isSelected) {
+                        borderClass = "border-accent-orange";
+                        bgClass = "bg-accent-orange/10";
+                        textClass = "text-accent-orange";
+                        badgeClass = "bg-accent-orange text-surface";
+                      } else {
+                        borderClass = "border-hairline opacity-50";
+                        badgeClass = "bg-surface-container-low text-ink-muted";
+                      }
+                    }
+
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => handleSelectOption(opt)}
+                        disabled={!!selectedOption}
+                        className={`w-full border-2 rounded-[12px] p-md font-title text-title transition-colors active:scale-[0.98] shadow-sm text-left flex flex-col group ${borderClass} ${bgClass}`}
+                      >
+                        <div className="flex items-center">
+                          <span className={`w-8 h-8 rounded-full flex items-center justify-center font-bold mr-md shadow-sm transition-colors flex-shrink-0 ${badgeClass}`}>
+                            {['A', 'B', 'C', 'D'][i]}
+                          </span>
+                          <span className={textClass}>{opt.word}</span>
+                        </div>
+                        
+                        {selectedOption && (isCorrectAnswer || isSelected) && (
+                          <div className={`mt-sm ml-[48px] text-body-sm font-body-sm ${textClass}`}>
+                            {opt.meaning}
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <button
+                  onClick={() => setShowHint(true)}
+                  disabled={showHint}
+                  className="w-full bg-surface-container-high text-on-surface rounded-full py-md px-lg font-title text-title hover:bg-surface-container-highest transition-all active:scale-[0.98] shadow-sm disabled:opacity-50 disabled:pointer-events-none"
+                >
+                  Gợi ý
+                </button>
+              </>
             )}
-
-            <div className="flex gap-sm w-full">
-              <button
-                onClick={() => setShowHint(true)}
-                disabled={showHint}
-                className="w-1/3 bg-surface-container-high text-on-surface rounded-full py-md px-lg font-title text-title hover:bg-surface-container-highest transition-all active:scale-[0.98] shadow-sm disabled:opacity-50 disabled:pointer-events-none"
-              >
-                Gợi ý
-              </button>
-              <button
-                onClick={handleNext}
-                disabled={!userInput.trim()}
-                className="w-2/3 bg-primary text-on-primary rounded-full py-md px-lg font-title text-title hover:bg-primary-active transition-all active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none shadow-sm flex items-center justify-center gap-xs"
-              >
-                Tiếp tục
-              </button>
-            </div>
           </div>
         </div>
       )}

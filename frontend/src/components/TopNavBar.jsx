@@ -7,6 +7,7 @@ export function TopNavBar({ wordCount, activePage, setActivePage, onOpenDrawer, 
     { id: 'listening', label: 'Luyện nghe' },
     { id: 'reading', label: 'Đọc - hiểu' },
     { id: 'speaking', label: 'Luyện nói' },
+    { id: 'exam', label: 'Kiểm tra' },
     { id: 'review', label: 'Ôn ngắt quãng' },
   ];
 
@@ -22,7 +23,7 @@ export function TopNavBar({ wordCount, activePage, setActivePage, onOpenDrawer, 
         <span className="text-heading-1 font-heading-1 text-primary hidden sm:block">MinusLearn</span>
       </div>
 
-      <div className="flex flex-1 justify-center h-full items-center gap-sm overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+      <div className="flex flex-[3] justify-start md:justify-center h-full items-center gap-sm overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {navItems.map(item => (
           <button
             key={item.id}
