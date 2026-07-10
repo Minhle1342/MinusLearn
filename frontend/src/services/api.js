@@ -177,7 +177,8 @@ Return ONLY JSON with this schema:
 {
   "situation": "Short description of the situation in Vietnamese (e.g. Bạn đang ở nhà hàng...)",
   "npc_name": "Name of the NPC (e.g. Waiter, John)",
-  "npc_first_line": "The first English sentence spoken by the NPC to start the conversation"
+  "npc_first_line": "The first English sentence spoken by the NPC to start the conversation",
+  "npc_first_emotion": "The emotion of the NPC (happy, sad, surprised, thinking, neutral, excited, confused)"
 }`;
 
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
@@ -204,7 +205,7 @@ export async function chatWithNPC(recentHistory, apiKey, model) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       systemInstruction: {
-        parts: [{ text: "You are an English conversational partner (NPC) for a student practicing speaking. Respond naturally and concisely in English. DO NOT point out grammar or pronunciation mistakes during the chat. Keep your response under 3 sentences. Return JSON with schema: { \"text\": \"your english response\" }" }]
+        parts: [{ text: "You are an English conversational partner for a student. Behave exactly like a real human. Use natural language, conversational fillers (like um, well, ah), occasional slang, and ask engaging questions. Have a distinct personality. DO NOT act like an AI tutor. DO NOT point out grammar or pronunciation mistakes. Keep your response under 3 sentences. Return JSON with schema: { \"text\": \"your english response\", \"emotion\": \"happy|sad|surprised|thinking|neutral|excited|confused\" }" }]
       },
       contents: recentHistory,
       generationConfig: { 
@@ -222,14 +223,21 @@ export async function chatWithNPC(recentHistory, apiKey, model) {
 
 export async function evaluateSpeakingPractice(fullHistoryText, apiKey, model) {
   const prompt = `You are a private English tutor. Review the following speaking practice transcript between a student and an NPC. The student's speech was captured via Speech-to-Text (STT), so pronunciation mistakes often appear as incorrect words (e.g., 'sink' instead of 'think').
-Identify the student's grammar errors and likely pronunciation weaknesses based on context. Provide constructive feedback in Vietnamese.
+Identify the student's grammar errors and likely pronunciation weaknesses based on context. 
+For pronunciation, identify the specific IPA phonemes the user struggles with. Provide constructive feedback in Vietnamese.
 TRANSCRIPT:
 ${fullHistoryText}
 
 Return ONLY JSON with this schema:
 {
   "feedback": "Overall feedback and encouragement in Vietnamese (2-3 sentences)",
-  "weaknesses": ["Specific mistake 1 (Vietnamese)", "Specific mistake 2 (Vietnamese)"]
+  "weaknesses": ["Specific mistake 1 (Vietnamese)", "Specific mistake 2 (Vietnamese)"],
+  "phonemesToPractice": [
+    {
+      "phoneme": "/θ/",
+      "reason": "Giải thích chi tiết vì sao phát âm sai từ đó dẫn đến từ sai trong ngữ cảnh (bằng tiếng Việt)"
+    }
+  ]
 }`;
 
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {

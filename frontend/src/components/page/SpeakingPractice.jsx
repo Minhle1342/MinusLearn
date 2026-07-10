@@ -10,7 +10,8 @@ import {
   MessageSquare,
   ChevronRight,
   Loader2,
-  BookOpen
+  BookOpen,
+  ExternalLink
 } from 'lucide-react';
 import {
   createPronunciationAssessmentSession,
@@ -20,6 +21,16 @@ import {
 import { useLocalStorage } from '../../hooks/useLocalStorage';
 import { speakEnglishText, getEnglishVoices, getSelectedEnglishVoice } from '../../utils/speech';
 import { generateSpeakingScenario, chatWithNPC, evaluateSpeakingPractice } from '../../services/api';
+
+const EMOTION_EMOJIS = {
+  happy: '😊',
+  sad: '😢',
+  surprised: '😲',
+  thinking: '🤔',
+  neutral: '😐',
+  excited: '🤩',
+  confused: '😕'
+};
 
 function shuffleWords(words) {
   return [...words].sort(() => 0.5 - Math.random());
@@ -159,6 +170,7 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
         setAiChatHistory([{
           speaker: scenario.npc_name || 'AI',
           text: scenario.npc_first_line,
+          emotion: scenario.npc_first_emotion || 'neutral',
           isUserTurn: false
         }]);
         
@@ -309,6 +321,7 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
       const nextNpcMessage = {
         speaker: aiChatHistory[0]?.speaker || 'AI',
         text: reply.text,
+        emotion: reply.emotion || 'neutral',
         isUserTurn: false
       };
       
@@ -586,7 +599,9 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
                       />
                     </div>
                     <div className="flex flex-col items-start max-w-[70%]">
-                      <span className="font-eyebrow text-[10px] text-ink-muted mb-1">{item.speaker}</span>
+                      <span className="font-eyebrow text-[10px] text-ink-muted mb-1">
+                        {item.speaker} {item.emotion && EMOTION_EMOJIS[item.emotion.toLowerCase()] ? EMOTION_EMOJIS[item.emotion.toLowerCase()] : ''}
+                      </span>
                       <div className="p-md rounded-[18px] rounded-tl-[4px] border shadow-sm font-body-md text-body-md transition-colors bg-surface border-primary/50 text-ink ring-2 ring-primary/10">
                         {item.text}
                         <button
@@ -716,7 +731,7 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
                   <h3 className="font-heading-3 text-heading-3 text-accent-orange mb-sm flex items-center gap-xs">
                     <BookOpen size={20} /> Lỗi cần cải thiện
                   </h3>
-                  <ul className="list-disc pl-lg space-y-xs">
+                    <ul className="list-disc pl-lg space-y-xs">
                     {aiFeedback.weaknesses.map((weakness, i) => (
                       <li key={i} className="font-body-md text-body-md text-ink">{weakness}</li>
                     ))}
@@ -724,6 +739,31 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
                   <p className="font-body-sm text-body-sm text-ink-muted mt-md italic">
                     Lưu ý: Do không có câu mẫu để đối chiếu chính xác, hệ thống phân tích lỗi dựa trên ngữ pháp và các từ bạn phát âm sai (khiến máy nhận diện nhầm thành từ khác).
                   </p>
+                </div>
+              )}
+              {aiFeedback.phonemesToPractice && aiFeedback.phonemesToPractice.length > 0 && (
+                <div className="bg-accent-sky/5 border border-accent-sky/20 rounded-[12px] p-lg">
+                  <h3 className="font-heading-3 text-heading-3 text-accent-sky mb-sm flex items-center gap-xs">
+                    <Volume2 size={20} /> Luyện tập Phiên âm (IPA)
+                  </h3>
+                  <div className="flex flex-col gap-sm">
+                    {aiFeedback.phonemesToPractice.map((p, i) => (
+                      <div key={i} className="bg-surface border border-hairline rounded-[8px] p-md flex flex-col sm:flex-row sm:items-center gap-md justify-between">
+                        <div>
+                          <div className="font-heading-3 text-heading-3 text-ink mb-1">{p.phoneme}</div>
+                          <p className="font-body-sm text-body-sm text-ink-muted">{p.reason}</p>
+                        </div>
+                        <a
+                          href={`https://www.youtube.com/results?search_query=how+to+pronounce+english+phoneme+${encodeURIComponent(p.phoneme)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="shrink-0 inline-flex items-center gap-xs px-md py-xs bg-accent-sky/10 text-accent-sky hover:bg-accent-sky/20 rounded-full font-button text-button transition-colors"
+                        >
+                          <ExternalLink size={16} /> Xem hướng dẫn
+                        </a>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
