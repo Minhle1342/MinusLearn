@@ -2,25 +2,39 @@ export const GEMINI_DEFAULT_KEY = import.meta.env.VITE_GEMINI_DEFAULT_KEY || "";
 export const GEMINI_DEFAULT_MODEL = import.meta.env.VITE_GEMINI_DEFAULT_MODEL || "gemini-3.1-flash-lite-preview";
 
 export async function generateWordsFromText(text, apiKey, model) {
-  const prompt = `Phân tích danh sách từ vựng sau và trả về một mảng JSON (không bọc trong markdown, chỉ trả về chuỗi JSON thuần) chứa các từ vựng. 
-Mỗi từ là một object với các key: 'word' (từ gốc tiếng Anh), 'phonetic' (phiên âm IPA), 'meaning' (nghĩa tiếng Việt chi tiết), 'example' (1 câu ví dụ tiếng Anh).
-Danh sách từ: ${text}`;
+  const prompt = `Phân tích từ vựng và trả về mảng JSON. Format: [{"word":"","phonetic":"","meaning":"","example":""}]. Từ vựng: ${text}`;
 
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }]
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { responseMimeType: "application/json" }
     })
   });
 
   if (!response.ok) throw new Error("Lỗi kết nối AI. Kiểm tra lại API Key.");
 
   const data = await response.json();
-  let aiText = data.candidates[0].content.parts[0].text;
-
-  // Remove markdown formatting if any
-  aiText = aiText.replace(/```json/g, '').replace(/```/g, '').trim();
+  aiText = aiText.replace(/```json/gi, '').replace(/```/g, '').trim();
+  
+  let depth = 0, inString = false, escape = false, startIndex = aiText.indexOf('['), endIndex = -1;
+  if (startIndex !== -1) {
+    for (let i = startIndex; i < aiText.length; i++) {
+      const char = aiText[i];
+      if (escape) { escape = false; continue; }
+      if (char === '\\') { escape = true; continue; }
+      if (char === '"') { inString = !inString; continue; }
+      if (!inString) {
+        if (char === '[') depth++;
+        else if (char === ']') {
+          depth--;
+          if (depth === 0) { endIndex = i; break; }
+        }
+      }
+    }
+    if (endIndex !== -1) aiText = aiText.substring(startIndex, endIndex + 1);
+  }
 
   const newWords = JSON.parse(aiText);
   if (!Array.isArray(newWords)) throw new Error("Định dạng trả về không hợp lệ");
@@ -94,60 +108,29 @@ export async function generateImageForWord(wordStr, apiKeys = {}, apiIndex = 0) 
 }
 
 export async function generateExamContent(wordList, apiKey, model, difficulty = 'Trung bình') {
-  const wordSummary = wordList.map(w => `"${w.word}" (${w.meaning})`).join(', ');
+  const wordSummary = wordList.map(w => `${w.word}:${w.meaning}`).join('|');
+  const isEasy = difficulty === 'Dễ';
+  const c = difficulty === 'Khó' ? 9 : difficulty === 'Trung bình' ? 6 : '3-5';
 
-  let listeningDetail = "- Phần listening: Tạo đoạn hội thoại tự nhiên giữa 2-3 người, sử dụng tất cả từ vựng. Tạo 3-5 câu hỏi trắc nghiệm về nội dung.";
-  let speakingDetail = "- Phần speaking: Tạo tình huống hội thoại 2-3 người. Đánh dấu \"isUserTurn\": true cho các lượt mà người dùng sẽ đọc. Các lượt còn lại là NPC (isUserTurn: false). Sử dụng các từ vựng trong câu thoại.";
-  let readingDetail = "- Phần reading: Mỗi từ vựng tạo 1 câu ví dụ HOÀN TOÀN MỚI (khác với câu example có sẵn). Mảng options bao gồm 4 TỪ VỰNG TIẾNG ANH (tuyệt đối không dùng nghĩa tiếng Việt), trong đó luôn đặt từ vựng đúng ở correctIndex, 3 đáp án sai là các TỪ VỰNG TIẾNG ANH khác trong danh sách.";
-
-  if (difficulty === 'Trung bình') {
-    listeningDetail = "- Phần listening: Tạo đoạn hội thoại tự nhiên, sử dụng từ vựng. TẠO CHÍNH XÁC 6 CÂU HỎI trắc nghiệm về nội dung.";
-    speakingDetail = "- Phần speaking: Tạo tình huống hội thoại. Đánh dấu \"isUserTurn\": true cho các lượt người dùng đọc. TẠO CHÍNH XÁC 6 LƯỢT CỦA NGƯỜI DÙNG.";
-    readingDetail = "- Phần reading: Tạo CHÍNH XÁC 6 câu ví dụ MỚI. Nếu danh sách từ vựng ít hơn 6, HÃY LẶP LẠI từ vựng. Mảng options bao gồm 4 TỪ VỰNG TIẾNG ANH (không dùng nghĩa tiếng Việt), từ vựng đúng ở correctIndex.";
-  } else if (difficulty === 'Khó') {
-    listeningDetail = "- Phần listening: Tạo đoạn hội thoại tự nhiên, sử dụng từ vựng. TẠO CHÍNH XÁC 9 CÂU HỎI trắc nghiệm về nội dung.";
-    speakingDetail = "- Phần speaking: Tạo tình huống hội thoại. Đánh dấu \"isUserTurn\": true cho các lượt người dùng đọc. TẠO CHÍNH XÁC 9 LƯỢT CỦA NGƯỜI DÙNG.";
-    readingDetail = "- Phần reading: Tạo CHÍNH XÁC 9 câu ví dụ MỚI. Nếu danh sách từ vựng ít hơn 9, HÃY LẶP LẠI từ vựng. Mảng options bao gồm 4 TỪ VỰNG TIẾNG ANH (không dùng nghĩa tiếng Việt), từ vựng đúng ở correctIndex.";
-  }
-
-  const prompt = `Bạn là một giáo viên tiếng Anh. Tôi đưa cho bạn danh sách từ vựng, hãy tạo một bài kiểm tra tiếng Anh gồm 3 phần với độ khó: ${difficulty.toUpperCase()}. Trả về JSON thuần (KHÔNG bọc trong markdown, KHÔNG dùng \`\`\`json).
-
-DANH SÁCH TỪ VỰNG: ${wordSummary}
-
-YÊU CẦU BẮT BUỘC: Mỗi từ vựng PHẢI xuất hiện ít nhất 1 lần trong bài kiểm tra.
-
-Trả về JSON với cấu trúc sau:
-{
-  "listening": {
-    "dialogue": [
-      { "speaker": "Tên nhân vật (VD: Alice, Bob)", "text": "Câu thoại tiếng Anh" }
-    ],
-    "questions": [
-      { "question": "Câu hỏi về nội dung đoạn hội thoại (tiếng Anh)", "options": ["A", "B", "C", "D"], "correctIndex": 0 }
-    ]
-  },
-  "speaking": {
-    "situation": "Mô tả tình huống hội thoại bằng tiếng Việt",
-    "dialogue": [
-      { "speaker": "Tên nhân vật hoặc You", "text": "Câu thoại tiếng Anh", "isUserTurn": false }
-    ]
-  },
-  "reading": [
-    { "word": "từ vựng gốc", "meaning": "nghĩa tiếng Việt", "newExample": "Câu ví dụ MỚI HOÀN TOÀN có chứa từ vựng này (KHÔNG dùng lại câu ví dụ có sẵn)", "options": ["từ tiếng Anh đúng", "từ tiếng Anh sai 1", "từ tiếng Anh sai 2", "từ tiếng Anh sai 3"], "correctIndex": 0 }
-  ]
-}
-
-CHI TIẾT:
-${listeningDetail}
-${speakingDetail}
-${readingDetail}`;
+  const prompt = `Tạo bài kiểm tra TA 3 phần, độ khó:${difficulty}. CHỈ TRẢ VỀ JSON, KHÔNG BÌNH LUẬN.
+TỪ VỰNG:${wordSummary}
+YÊU CẦU: Dùng mỗi từ >=1 lần.
+JSON SCHEMA:
+{"listening":{"dialogue":[{"speaker":"Tên","text":"Câu TA"}],"questions":[{"question":"Hỏi nội dung(TA)","options":["A","B","C","D"],"correctIndex":0}]},"speaking":{"situation":"Tình huống(TV)","dialogue":[{"speaker":"Tên/You","text":"Câu TA","isUserTurn":false}]},"reading":[{"word":"Từ gốc","meaning":"Nghĩa TV","newExample":"Câu ví dụ MỚI","options":["TA đúng","TA sai","TA sai","TA sai"],"correctIndex":0}]}
+QUY TẮC:
+- listening: ${isEasy ? '3-5' : c} câu hỏi.
+- speaking: "isUserTurn":true cho user. Tạo ${isEasy ? 'vài' : c} lượt user.
+- reading: ${isEasy ? 'Mỗi từ 1' : c} câu ví dụ MỚI. Options GỒM 4 TỪ TA (KHÔNG dùng tiếng Việt).`;
 
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { temperature: 0.8 }
+      generationConfig: { 
+        temperature: 0.8,
+        responseMimeType: "application/json"
+      }
     })
   });
 
@@ -156,7 +139,25 @@ ${readingDetail}`;
   const data = await response.json();
   let aiText = data.candidates[0].content.parts[0].text;
 
-  aiText = aiText.replace(/```json/g, '').replace(/```/g, '').trim();
+  aiText = aiText.replace(/```json/gi, '').replace(/```/g, '').trim();
+  
+  let depth = 0, inString = false, escape = false, startIndex = aiText.indexOf('{'), endIndex = -1;
+  if (startIndex !== -1) {
+    for (let i = startIndex; i < aiText.length; i++) {
+      const char = aiText[i];
+      if (escape) { escape = false; continue; }
+      if (char === '\\') { escape = true; continue; }
+      if (char === '"') { inString = !inString; continue; }
+      if (!inString) {
+        if (char === '{') depth++;
+        else if (char === '}') {
+          depth--;
+          if (depth === 0) { endIndex = i; break; }
+        }
+      }
+    }
+    if (endIndex !== -1) aiText = aiText.substring(startIndex, endIndex + 1);
+  }
 
   const examData = JSON.parse(aiText);
 
@@ -165,4 +166,86 @@ ${readingDetail}`;
   }
 
   return examData;
+}
+
+export async function generateSpeakingScenario(wordList, topicName, apiKey, model) {
+  const words = wordList.map(w => w.word).join(', ');
+  const prompt = `Create a short English speaking practice scenario for a student about the topic: "${topicName}". 
+Try to incorporate some of these words if natural: ${words}.
+You are an NPC in this scenario.
+Return ONLY JSON with this schema:
+{
+  "situation": "Short description of the situation in Vietnamese (e.g. Bạn đang ở nhà hàng...)",
+  "npc_name": "Name of the NPC (e.g. Waiter, John)",
+  "npc_first_line": "The first English sentence spoken by the NPC to start the conversation"
+}`;
+
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { 
+        temperature: 0.7,
+        responseMimeType: "application/json"
+      }
+    })
+  });
+
+  if (!response.ok) throw new Error("Lỗi kết nối AI.");
+  const data = await response.json();
+  const text = data.candidates[0].content.parts[0].text;
+  return JSON.parse(text);
+}
+
+export async function chatWithNPC(recentHistory, apiKey, model) {
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      systemInstruction: {
+        parts: [{ text: "You are an English conversational partner (NPC) for a student practicing speaking. Respond naturally and concisely in English. DO NOT point out grammar or pronunciation mistakes during the chat. Keep your response under 3 sentences. Return JSON with schema: { \"text\": \"your english response\" }" }]
+      },
+      contents: recentHistory,
+      generationConfig: { 
+        temperature: 0.7,
+        responseMimeType: "application/json"
+      }
+    })
+  });
+
+  if (!response.ok) throw new Error("Lỗi kết nối AI.");
+  const data = await response.json();
+  const text = data.candidates[0].content.parts[0].text;
+  return JSON.parse(text);
+}
+
+export async function evaluateSpeakingPractice(fullHistoryText, apiKey, model) {
+  const prompt = `You are a private English tutor. Review the following speaking practice transcript between a student and an NPC. The student's speech was captured via Speech-to-Text (STT), so pronunciation mistakes often appear as incorrect words (e.g., 'sink' instead of 'think').
+Identify the student's grammar errors and likely pronunciation weaknesses based on context. Provide constructive feedback in Vietnamese.
+TRANSCRIPT:
+${fullHistoryText}
+
+Return ONLY JSON with this schema:
+{
+  "feedback": "Overall feedback and encouragement in Vietnamese (2-3 sentences)",
+  "weaknesses": ["Specific mistake 1 (Vietnamese)", "Specific mistake 2 (Vietnamese)"]
+}`;
+
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { 
+        temperature: 0.5,
+        responseMimeType: "application/json"
+      }
+    })
+  });
+
+  if (!response.ok) throw new Error("Lỗi kết nối AI.");
+  const data = await response.json();
+  const text = data.candidates[0].content.parts[0].text;
+  return JSON.parse(text);
 }

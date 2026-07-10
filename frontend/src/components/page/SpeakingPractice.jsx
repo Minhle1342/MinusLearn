@@ -7,6 +7,10 @@ import {
   Square,
   Volume2,
   XCircle,
+  MessageSquare,
+  ChevronRight,
+  Loader2,
+  BookOpen
 } from 'lucide-react';
 import {
   createPronunciationAssessmentSession,
@@ -14,7 +18,8 @@ import {
   hasSpeechRecognitionSupport,
 } from '../../services/speechAssessment';
 import { useLocalStorage } from '../../hooks/useLocalStorage';
-import { speakEnglishText } from '../../utils/speech';
+import { speakEnglishText, getEnglishVoices, getSelectedEnglishVoice } from '../../utils/speech';
+import { generateSpeakingScenario, chatWithNPC, evaluateSpeakingPractice } from '../../services/api';
 
 function shuffleWords(words) {
   return [...words].sort(() => 0.5 - Math.random());
@@ -24,8 +29,30 @@ function formatScore(score) {
   return typeof score === 'number' ? Math.round(score) : '-';
 }
 
+const SPEAKER_COLORS = [
+  { bg: 'bg-accent-sky/10', text: 'text-accent-sky', border: 'border-accent-sky/20' },
+  { bg: 'bg-accent-pink/10', text: 'text-accent-pink', border: 'border-accent-pink/20' },
+  { bg: 'bg-accent-green/10', text: 'text-accent-green', border: 'border-accent-green/20' },
+  { bg: 'bg-accent-orange/10', text: 'text-accent-orange', border: 'border-accent-orange/20' },
+  { bg: 'bg-accent-purple/10', text: 'text-accent-purple', border: 'border-accent-purple/20' },
+  { bg: 'bg-accent-teal/10', text: 'text-accent-teal', border: 'border-accent-teal/20' },
+];
+
+function getSpeakerStyles(speakerName) {
+  if (!speakerName) return SPEAKER_COLORS[0];
+  let hash = 0;
+  for (let i = 0; i < speakerName.length; i++) {
+    hash = speakerName.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const index = Math.abs(hash) % SPEAKER_COLORS.length;
+  return SPEAKER_COLORS[index];
+}
+
 export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpenSettings, setSrData }) {
   const [phase, setPhase] = useState('setup');
+  const [practiceMode, setPracticeMode] = useState('read'); // 'read' or 'ai'
+  
+  // Read mode states
   const [wordCount, setWordCount] = useState(10);
   const [practiceQueue, setPracticeQueue] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -36,6 +63,14 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
   const [errorMessage, setErrorMessage] = useState('');
   const sessionRef = useRef(null);
   const [speakingMistakes, setSpeakingMistakes] = useLocalStorage('minuslearn_speaking_mistakes', {});
+
+  // AI mode states
+  const [aiChatHistory, setAiChatHistory] = useState([]);
+  const [aiSituation, setAiSituation] = useState('');
+  const [aiFeedback, setAiFeedback] = useState(null);
+  const [isWaitingForAI, setIsWaitingForAI] = useState(false);
+  const chatEndRef = useRef(null);
+  const [speakerVoiceMap, setSpeakerVoiceMap] = useState({});
 
   const currentTopic = topics.find(topic => topic.id === activeTopicId);
   const topicWords = useMemo(
@@ -63,6 +98,9 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
     setCurrentResult(null);
     setSessionResults([]);
     setErrorMessage('');
+    setAiChatHistory([]);
+    setAiSituation('');
+    setAiFeedback(null);
     if (sessionRef.current) {
       sessionRef.current.close();
       sessionRef.current = null;
@@ -75,34 +113,80 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
       sessionRef.current = null;
     }
   }, []);
+  
+  useEffect(() => {
+    if (phase === 'ai_playing' && chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+  }, [aiChatHistory, phase, liveTranscript]);
 
-  const handleStartPractice = () => {
+  const handleStartPractice = async () => {
     if (!hasSpeechRecognition || speakableWords.length === 0) return;
 
-    const count = Math.min(Math.max(1, wordCount), speakableWords.length);
-    setPracticeQueue(shuffleWords(speakableWords).slice(0, count));
-    setCurrentIndex(0);
-    setLiveTranscript('');
-    setCurrentResult(null);
-    setSessionResults([]);
-    setErrorMessage('');
-    setPhase('playing');
+    if (practiceMode === 'read') {
+      const count = Math.min(Math.max(1, wordCount), speakableWords.length);
+      setPracticeQueue(shuffleWords(speakableWords).slice(0, count));
+      setCurrentIndex(0);
+      setLiveTranscript('');
+      setCurrentResult(null);
+      setSessionResults([]);
+      setErrorMessage('');
+      setPhase('playing');
+    } else {
+      setPhase('ai_loading');
+      setAiChatHistory([]);
+      setAiSituation('');
+      setAiFeedback(null);
+      setErrorMessage('');
+      
+      try {
+        const scenario = await generateSpeakingScenario(
+          topicWords, 
+          currentTopic?.name || 'General', 
+          settings.apiKey, 
+          settings.model
+        );
+        
+        const voices = getEnglishVoices();
+        const shuffledVoices = [...voices].sort(() => 0.5 - Math.random());
+        if (shuffledVoices.length > 0) {
+          setSpeakerVoiceMap({
+            [scenario.npc_name || 'AI']: shuffledVoices[0].voiceURI
+          });
+        }
+
+        setAiSituation(scenario.situation);
+        setAiChatHistory([{
+          speaker: scenario.npc_name || 'AI',
+          text: scenario.npc_first_line,
+          isUserTurn: false
+        }]);
+        
+        setPhase('ai_playing');
+        
+        // Auto play first line
+        setTimeout(() => {
+          speakDialogueLine({ text: scenario.npc_first_line, speaker: scenario.npc_name || 'AI' });
+        }, 500);
+      } catch (err) {
+        setErrorMessage(err.message || 'Lỗi tạo tình huống. Hãy thử lại.');
+        setPhase('setup');
+      }
+    }
   };
 
+  // --- READ MODE HANDLERS ---
   const handleStartRecording = async () => {
     if (!currentWord || isRecording) return;
-
     setLiveTranscript('');
     setCurrentResult(null);
     setErrorMessage('');
-
     try {
       const session = await createPronunciationAssessmentSession({
         referenceText: currentWord.example,
         onTranscript: setLiveTranscript,
         onError: setErrorMessage,
       });
-
       sessionRef.current = session;
       await session.start();
       setIsRecording(true);
@@ -114,7 +198,6 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
 
   const handleStopRecording = async () => {
     if (!sessionRef.current || !isRecording) return;
-
     try {
       const result = await sessionRef.current.stop();
       setCurrentResult(result);
@@ -174,9 +257,115 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
         return next;
       });
     }
-
     setPhase('results');
   };
+
+  // --- AI MODE HANDLERS ---
+  const handleStartAiRecording = async () => {
+    if (isRecording || isWaitingForAI) return;
+    setLiveTranscript('');
+    setErrorMessage('');
+    try {
+      const session = await createPronunciationAssessmentSession({
+        referenceText: '', // Free conversation
+        onTranscript: setLiveTranscript,
+        onError: setErrorMessage,
+      });
+      sessionRef.current = session;
+      await session.start();
+      setIsRecording(true);
+    } catch (error) {
+      setErrorMessage(error.message || 'Không thể bắt đầu ghi âm.');
+      setIsRecording(false);
+    }
+  };
+
+  const handleStopAiRecording = async () => {
+    if (!sessionRef.current || !isRecording) return;
+    try {
+      const result = await sessionRef.current.stop();
+      if (!result.transcript) {
+        setErrorMessage('Không nghe rõ bạn nói gì. Hãy thử lại.');
+        return;
+      }
+      
+      const newHistory = [...aiChatHistory, {
+        speaker: 'You',
+        text: result.transcript,
+        isUserTurn: true
+      }];
+      setAiChatHistory(newHistory);
+      setLiveTranscript('');
+      setIsWaitingForAI(true);
+      
+      // Call AI to get next line, mapping properties to standard roles
+      const recentHistory = newHistory.slice(-4).map(msg => ({
+        role: msg.isUserTurn ? 'user' : 'model',
+        parts: [{ text: msg.text }]
+      }));
+      
+      const reply = await chatWithNPC(recentHistory, settings.apiKey, settings.model);
+      
+      const nextNpcMessage = {
+        speaker: aiChatHistory[0]?.speaker || 'AI',
+        text: reply.text,
+        isUserTurn: false
+      };
+      
+      setAiChatHistory(prev => [...prev, nextNpcMessage]);
+      
+      // Auto play next line
+      setTimeout(() => {
+        speakDialogueLine(nextNpcMessage);
+      }, 500);
+      
+    } catch (error) {
+      setErrorMessage(error.message || 'Lỗi khi nhận diện giọng nói hoặc gọi AI.');
+    } finally {
+      sessionRef.current = null;
+      setIsRecording(false);
+      setIsWaitingForAI(false);
+    }
+  };
+
+  const handleEndAiChat = async () => {
+    setPhase('ai_evaluating');
+    try {
+      const fullHistoryText = aiChatHistory.map(msg => `${msg.speaker}: ${msg.text}`).join('\n');
+      const feedback = await evaluateSpeakingPractice(fullHistoryText, settings.apiKey, settings.model);
+      setAiFeedback(feedback);
+      
+      // We can also trigger SRS logic here if needed, but since it's unscripted, 
+      // we don't know exactly which words they used correctly unless we parse it. 
+      // For now, we skip updating setSrData for AI mode.
+      
+      setPhase('ai_results');
+    } catch (err) {
+      setErrorMessage(err.message || 'Lỗi khi nhận xét. Vui lòng thử lại sau.');
+      setPhase('setup'); // Fallback to setup or maybe a partial result
+    }
+  };
+
+  const speakDialogueLine = (line, rate = 0.9) => {
+    return new Promise(resolve => {
+      if (!window.speechSynthesis) { resolve(); return; }
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(line.text);
+      const voice = getSelectedEnglishVoice(speakerVoiceMap[line.speaker] || settings?.speechVoiceURI);
+      if (voice) {
+        utterance.voice = voice;
+        utterance.lang = voice.lang;
+      } else {
+        utterance.lang = 'en-US';
+      }
+      utterance.rate = rate;
+      utterance.onend = resolve;
+      utterance.onerror = resolve;
+      window.speechSynthesis.speak(utterance);
+    });
+  };
+
+  // --- RENDERING ---
 
   if (!activeTopicId || topicWords.length === 0) {
     return (
@@ -218,19 +407,61 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
           <p className="font-body-md text-body-md text-ink-muted mb-xxl">
             Chủ đề <span className="font-bold text-ink px-1">{currentTopic?.name}</span> hiện có {speakableWords.length} câu ví dụ có thể luyện nói.
           </p>
+          
+          {errorMessage && (
+            <div className="w-full bg-error-container text-on-error-container border border-error/20 rounded-[12px] p-md mb-lg font-body-sm text-body-sm text-left">
+              {errorMessage}
+            </div>
+          )}
 
           <div className="w-full text-left mb-lg bg-canvas-soft p-lg rounded-[12px] border border-hairline">
             <label className="block font-eyebrow text-eyebrow text-primary uppercase mb-sm tracking-wide">
-              Số câu muốn luyện
+              Chế độ luyện tập
             </label>
-            <input
-              type="number"
-              min="1"
-              max={speakableWords.length}
-              value={wordCount}
-              onChange={event => setWordCount(parseInt(event.target.value, 10) || 1)}
-              className="w-full bg-surface border border-hairline rounded-[8px] p-sm font-title text-title text-ink focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-shadow"
-            />
+            <div className="flex bg-surface border border-hairline rounded-[8px] overflow-hidden mb-md">
+              <button
+                onClick={() => setPracticeMode('read')}
+                className={`flex-1 py-md text-center font-button text-button transition-colors ${
+                  practiceMode === 'read'
+                    ? 'bg-primary text-on-primary'
+                    : 'text-ink hover:bg-surface-container-low'
+                }`}
+              >
+                Đọc câu mẫu
+              </button>
+              <button
+                onClick={() => setPracticeMode('ai')}
+                className={`flex-1 py-md text-center font-button text-button transition-colors ${
+                  practiceMode === 'ai'
+                    ? 'bg-primary text-on-primary'
+                    : 'text-ink hover:bg-surface-container-low'
+                }`}
+              >
+                Trò chuyện với AI
+              </button>
+            </div>
+
+            {practiceMode === 'read' && (
+              <>
+                <label className="block font-eyebrow text-eyebrow text-primary uppercase mb-sm tracking-wide mt-md">
+                  Số câu muốn luyện
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max={speakableWords.length}
+                  value={wordCount}
+                  onChange={event => setWordCount(parseInt(event.target.value, 10) || 1)}
+                  className="w-full bg-surface border border-hairline rounded-[8px] p-sm font-title text-title text-ink focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-shadow"
+                />
+              </>
+            )}
+            
+            {practiceMode === 'ai' && (
+              <p className="font-body-sm text-body-sm text-ink-muted">
+                AI sẽ tạo tình huống ngẫu nhiên để bạn trò chuyện tự do. Ở cuối buổi, AI sẽ đóng vai gia sư và nhận xét phát âm, ngữ pháp của bạn.
+              </p>
+            )}
           </div>
 
           {!hasSpeechRecognition && (
@@ -257,7 +488,7 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
             >
               Bắt đầu
             </button>
-            {topicMistakes.length > 0 && (
+            {practiceMode === 'read' && topicMistakes.length > 0 && (
               <button
                 onClick={() => {
                   if (!hasSpeechRecognition || topicMistakes.length === 0) return;
@@ -281,6 +512,228 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
     );
   }
 
+  // AI MODE PHASES
+  if (phase === 'ai_loading') {
+    return (
+      <div className="min-h-full flex flex-col items-center justify-center p-xl">
+        <Loader2 size={64} className="text-primary animate-spin mb-xl" />
+        <h2 className="font-heading-2 text-heading-2 text-ink mb-sm">Đang tạo tình huống...</h2>
+        <p className="font-body-md text-body-md text-ink-muted">AI đang chuẩn bị một kịch bản giao tiếp cho chủ đề {currentTopic?.name}.</p>
+      </div>
+    );
+  }
+  
+  if (phase === 'ai_evaluating') {
+    return (
+      <div className="min-h-full flex flex-col items-center justify-center p-xl">
+        <Loader2 size={64} className="text-primary animate-spin mb-xl" />
+        <h2 className="font-heading-2 text-heading-2 text-ink mb-sm">Đang nhận xét...</h2>
+        <p className="font-body-md text-body-md text-ink-muted">Gia sư AI đang phân tích đoạn hội thoại để tìm ra điểm yếu của bạn.</p>
+      </div>
+    );
+  }
+  
+  if (phase === 'ai_playing') {
+    const isUserTurn = aiChatHistory.length > 0 && !aiChatHistory[aiChatHistory.length - 1].isUserTurn;
+    const lastNpcLine = aiChatHistory.length > 0 && !aiChatHistory[aiChatHistory.length - 1].isUserTurn ? aiChatHistory[aiChatHistory.length - 1] : null;
+
+    return (
+      <div className="min-h-full flex flex-col items-center p-lg md:p-xl">
+        <div className="w-full max-w-3xl mb-lg">
+          <div className="flex items-center gap-sm mb-md">
+            <div className="px-md py-xs rounded-full bg-accent-pink/10 text-accent-pink font-button text-button flex items-center gap-xs">
+              <MessageSquare size={16} /> Luyện nói với AI
+            </div>
+            <div className="flex-1 h-px bg-hairline" />
+            <span className="font-eyebrow text-eyebrow text-ink-muted">Chat</span>
+          </div>
+        </div>
+
+        {aiSituation && (
+          <div className="w-full max-w-3xl bg-accent-purple/5 border border-accent-purple/20 rounded-[12px] p-md mb-lg text-center">
+            <span className="font-body-md text-body-md text-ink">{aiSituation}</span>
+          </div>
+        )}
+
+        <div className="w-full max-w-3xl bg-surface border border-hairline rounded-[16px] p-lg md:p-xl shadow-sm flex flex-col">
+          {/* Chat Messages Area */}
+          <div className="flex-1 overflow-y-auto w-full p-md space-y-md min-h-[320px] max-h-[450px] bg-canvas-soft border border-hairline rounded-[16px] mb-lg relative">
+            {aiChatHistory.map((item, idx) => {
+              const isUser = item.isUserTurn;
+              const styles = getSpeakerStyles(item.speaker);
+
+              if (isUser) {
+                return (
+                  <div key={idx} className="flex justify-end items-end gap-sm animate-in slide-in-from-bottom-2 duration-300">
+                    <div className="flex flex-col items-end max-w-[70%]">
+                      <span className="font-eyebrow text-[10px] text-ink-muted mb-1">You</span>
+                      <div className="p-md rounded-[18px] rounded-tr-[4px] shadow-sm font-body-md text-body-md transition-colors bg-primary text-on-primary ring-2 ring-primary/30 border border-primary/20">
+                        {item.text}
+                      </div>
+                    </div>
+                  </div>
+                );
+              } else {
+                return (
+                  <div key={idx} className="flex justify-start items-start gap-sm animate-in slide-in-from-bottom-2 duration-300">
+                    <div className={`relative w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 border shadow-sm ${styles.bg} ${styles.border} overflow-hidden`}>
+                      <span className={`font-bold text-sm ${styles.text}`}>{item.speaker?.[0]}</span>
+                      <img 
+                        src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(item.speaker)}`} 
+                        alt={item.speaker} 
+                        className="absolute inset-0 w-full h-full object-cover"
+                        onError={(e) => { e.target.style.display = 'none'; }}
+                      />
+                    </div>
+                    <div className="flex flex-col items-start max-w-[70%]">
+                      <span className="font-eyebrow text-[10px] text-ink-muted mb-1">{item.speaker}</span>
+                      <div className="p-md rounded-[18px] rounded-tl-[4px] border shadow-sm font-body-md text-body-md transition-colors bg-surface border-primary/50 text-ink ring-2 ring-primary/10">
+                        {item.text}
+                        <button
+                          onClick={() => speakDialogueLine(item)}
+                          className="ml-xs inline-flex items-center justify-center align-middle p-1 rounded-full text-on-surface-variant hover:text-primary hover:bg-primary/10 transition-colors"
+                          title="Nghe lại"
+                        >
+                          <Volume2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+            })}
+            
+            {(isRecording || isWaitingForAI) && (
+              <div className="flex justify-end items-end gap-sm animate-in slide-in-from-bottom-2 duration-300">
+                <div className="flex flex-col items-end max-w-[70%]">
+                  <span className="font-eyebrow text-[10px] text-ink-muted mb-1">You</span>
+                  <div className="p-md rounded-[18px] rounded-tr-[4px] shadow-sm font-body-md text-body-md transition-colors bg-primary/20 text-ink ring-1 ring-primary/30 border border-primary/20">
+                    {isRecording ? (liveTranscript || 'Đang ghi âm...') : 'Đang suy nghĩ...'}
+                  </div>
+                </div>
+              </div>
+            )}
+            <div ref={chatEndRef} />
+          </div>
+
+          {errorMessage && (
+            <div className="w-full bg-error-container text-on-error-container border border-error/20 rounded-[12px] p-md mb-md font-body-sm text-body-sm text-left">
+              {errorMessage}
+            </div>
+          )}
+
+          {/* Bottom Messenger-like Input/Mic Bar */}
+          <div className="w-full bg-surface-container-low border border-hairline rounded-[24px] p-xs flex items-center gap-md shadow-sm">
+            
+            {/* NPC Voice reading buttons */}
+            {lastNpcLine && (
+              <div className="flex items-center gap-xs">
+                <button
+                  onClick={() => speakDialogueLine(lastNpcLine)}
+                  className="p-sm bg-primary/10 hover:bg-primary/20 text-primary rounded-full transition-colors"
+                  title="Nghe NPC đọc"
+                >
+                  <Volume2 size={20} />
+                </button>
+              </div>
+            )}
+
+            {/* Status / Transcript placeholder */}
+            <div className="flex-1 min-w-0 bg-canvas-soft border border-hairline rounded-full px-md py-sm flex items-center justify-between text-body-sm text-ink-muted">
+              {isRecording ? (
+                <span className="text-error animate-pulse flex items-center gap-xs font-semibold">
+                  <span className="w-2.5 h-2.5 rounded-full bg-error inline-block"></span>
+                  Đang ghi âm...
+                </span>
+              ) : isWaitingForAI ? (
+                <span className="truncate text-ink-faint">Chờ phản hồi từ AI...</span>
+              ) : (
+                <span className="truncate">Hãy bấm micro để trò chuyện</span>
+              )}
+            </div>
+
+            {/* User Mic & Navigation buttons */}
+            <div className="flex items-center gap-xs">
+              <button
+                type="button"
+                onClick={isRecording ? handleStopAiRecording : handleStartAiRecording}
+                disabled={isWaitingForAI}
+                className={`w-10 h-10 rounded-full flex items-center justify-center transition-all active:scale-90 border shadow-sm ${
+                  isRecording
+                    ? 'bg-error text-on-error border-error animate-pulse'
+                    : 'bg-primary text-on-primary border-primary hover:bg-primary-active'
+                } disabled:opacity-50 disabled:pointer-events-none`}
+              >
+                {isRecording ? <Square size={16} fill="currentColor" /> : <Mic size={20} />}
+              </button>
+            </div>
+          </div>
+          
+          <div className="mt-md flex justify-center">
+            <button
+              onClick={handleEndAiChat}
+              disabled={isRecording || isWaitingForAI || aiChatHistory.length < 2}
+              className="bg-surface-container-high text-on-surface rounded-full py-sm px-xl font-button text-button hover:bg-surface-container-highest transition-all shadow-sm border border-hairline disabled:opacity-50 disabled:pointer-events-none"
+            >
+              Kết thúc trò chuyện & Xem nhận xét
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  
+  if (phase === 'ai_results') {
+    return (
+      <div className="min-h-full flex items-center justify-center p-lg md:p-xl">
+        <div className="w-full max-w-4xl bg-surface border border-hairline rounded-[16px] p-lg md:p-xxl shadow-sm">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-lg mb-xl">
+            <div>
+              <h2 className="font-display-2 text-display-2 text-ink mb-xs">Nhận xét từ Gia sư AI</h2>
+              <p className="font-body-md text-body-md text-ink-muted">
+                Dựa trên cuộc trò chuyện tự do của bạn.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setPhase('setup')}
+              className="inline-flex items-center justify-center gap-xs bg-primary text-on-primary rounded-full py-sm px-xl font-button text-button hover:bg-primary-active transition-colors shadow-sm"
+            >
+              <RotateCcw size={18} />
+              Luyện lại
+            </button>
+          </div>
+
+          {aiFeedback && (
+            <div className="flex flex-col gap-md">
+              <div className="bg-canvas-soft border border-hairline rounded-[12px] p-lg">
+                <h3 className="font-heading-3 text-heading-3 text-ink mb-sm">Đánh giá chung</h3>
+                <p className="font-body-md text-body-md text-ink">{aiFeedback.feedback}</p>
+              </div>
+              
+              {aiFeedback.weaknesses && aiFeedback.weaknesses.length > 0 && (
+                <div className="bg-accent-orange/5 border border-accent-orange/20 rounded-[12px] p-lg">
+                  <h3 className="font-heading-3 text-heading-3 text-accent-orange mb-sm flex items-center gap-xs">
+                    <BookOpen size={20} /> Lỗi cần cải thiện
+                  </h3>
+                  <ul className="list-disc pl-lg space-y-xs">
+                    {aiFeedback.weaknesses.map((weakness, i) => (
+                      <li key={i} className="font-body-md text-body-md text-ink">{weakness}</li>
+                    ))}
+                  </ul>
+                  <p className="font-body-sm text-body-sm text-ink-muted mt-md italic">
+                    Lưu ý: Do không có câu mẫu để đối chiếu chính xác, hệ thống phân tích lỗi dựa trên ngữ pháp và các từ bạn phát âm sai (khiến máy nhận diện nhầm thành từ khác).
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // READ MODE PHASES
   if (phase === 'playing' && currentWord) {
     const progress = ((currentIndex + 1) / practiceQueue.length) * 100;
 

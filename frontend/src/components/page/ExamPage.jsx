@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   CheckCircle2, XCircle, Volume2, Mic, Square, RotateCcw,
-  ClipboardCheck, Headphones, BookOpen, MessageSquare, Loader2, ChevronRight
+  ClipboardCheck, Headphones, BookOpen, MessageSquare, Loader2, ChevronRight, Lightbulb
 } from 'lucide-react';
 import { generateExamContent } from '../../services/api';
 import { speakEnglishText, getEnglishVoices, getSelectedEnglishVoice } from '../../utils/speech';
@@ -70,6 +70,7 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
   const [readingInputValue, setReadingInputValue] = useState('');
   const [readingInputSubmitted, setReadingInputSubmitted] = useState(false);
   const [readingInputIsCorrect, setReadingInputIsCorrect] = useState(false);
+  const [showReadingHint, setShowReadingHint] = useState(false);
 
   // ── Derived ──
   const selectedWords = useMemo(
@@ -150,6 +151,7 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
       setCurrentReadingQ(0);
       setReadingAnswers([]);
       setReadingSelectedOption(null);
+      setShowReadingHint(false);
 
       setPhase('listening');
     } catch (err) {
@@ -308,6 +310,7 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
       setReadingInputValue('');
       setReadingInputSubmitted(false);
       setReadingInputIsCorrect(false);
+      setShowReadingHint(false);
       if (currentReadingQ + 1 < examData.reading.length) {
         setCurrentReadingQ(currentReadingQ + 1);
       } else {
@@ -346,6 +349,7 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
       setReadingInputValue('');
       setReadingInputSubmitted(false);
       setReadingInputIsCorrect(false);
+      setShowReadingHint(false);
       if (currentReadingQ + 1 < examData.reading.length) {
         setCurrentReadingQ(currentReadingQ + 1);
       } else {
@@ -854,8 +858,23 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
             Chọn từ thích hợp để điền vào chỗ trống
           </p>
 
-          <div className="w-full bg-canvas-soft border-2 border-hairline rounded-[12px] p-lg font-heading-2 text-heading-2 text-ink text-center mb-xl shadow-inner">
+          <div className="w-full bg-canvas-soft border-2 border-hairline rounded-[12px] p-lg font-heading-2 text-heading-2 text-ink text-center mb-xl shadow-inner relative">
             {exampleWithBlank || '____'}
+            
+            <div className="mt-md flex justify-center">
+              {!showReadingHint ? (
+                <button 
+                  onClick={() => setShowReadingHint(true)}
+                  className="text-primary text-body-sm font-button flex items-center gap-xs hover:underline"
+                >
+                  <Lightbulb size={16} /> Gợi ý
+                </button>
+              ) : (
+                <span className="text-body-md text-ink-muted italic border-t border-hairline pt-sm block w-full mt-sm">
+                  Gợi ý: {q.meaning}
+                </span>
+              )}
+            </div>
           </div>
 
           {((difficulty === 'Trung bình' || difficulty === 'Khó') && currentReadingQ >= 3) ? (
