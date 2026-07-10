@@ -181,8 +181,8 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
   if (!activeTopicId || topicWords.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center min-h-full p-xl text-center">
-        <div className="w-24 h-24 bg-surface rounded-full flex items-center justify-center shadow-sm mb-lg border border-hairline">
-          <Mic size={40} className="text-on-surface-variant" />
+        <div className="w-24 h-24 mb-md rounded-full bg-surface-container-low flex items-center justify-center">
+          <Mic size={48} className="text-primary" />
         </div>
         <h2 className="font-heading-2 text-heading-2 text-ink mb-sm">Chưa có từ vựng</h2>
         <p className="font-body-md text-body-md text-ink-muted max-w-md">
@@ -195,8 +195,8 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
   if (speakableWords.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center min-h-full p-xl text-center">
-        <div className="w-24 h-24 bg-surface rounded-full flex items-center justify-center shadow-sm mb-lg border border-hairline">
-          <Volume2 size={40} className="text-on-surface-variant" />
+        <div className="w-24 h-24 mb-md rounded-full bg-surface-container-low flex items-center justify-center">
+          <Volume2 size={48} className="text-primary" />
         </div>
         <h2 className="font-heading-2 text-heading-2 text-ink mb-sm">Chưa có câu ví dụ</h2>
         <p className="font-body-md text-body-md text-ink-muted max-w-md">

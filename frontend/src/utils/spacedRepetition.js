@@ -125,7 +125,7 @@ export function getDueWords(srData, wordIds) {
   for (const id of wordIds) {
     const sr = srData[id];
 
-    if (!sr || sr.nextReviewDate === null) {
+    if (!sr || sr.nextReviewDate == null) {
       // Never reviewed → treat as "new" and due immediately
       newWords.push(id);
     } else if (sr.nextReviewDate <= now) {

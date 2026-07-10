@@ -50,6 +50,7 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
   const [listeningAnswers, setListeningAnswers] = useState([]);
   const [listeningSelectedOption, setListeningSelectedOption] = useState(null);
   const [currentListeningQ, setCurrentListeningQ] = useState(0);
+  const [showDialogue, setShowDialogue] = useState(false);
 
   // ── Speaking state ──
   const [currentSpeakingLine, setCurrentSpeakingLine] = useState(0);
@@ -66,6 +67,9 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
   const [currentReadingQ, setCurrentReadingQ] = useState(0);
   const [readingAnswers, setReadingAnswers] = useState([]);
   const [readingSelectedOption, setReadingSelectedOption] = useState(null);
+  const [readingInputValue, setReadingInputValue] = useState('');
+  const [readingInputSubmitted, setReadingInputSubmitted] = useState(false);
+  const [readingInputIsCorrect, setReadingInputIsCorrect] = useState(false);
 
   // ── Derived ──
   const selectedWords = useMemo(
@@ -137,6 +141,7 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
       setListeningAnswers([]);
       setListeningSelectedOption(null);
       setCurrentListeningQ(0);
+      setShowDialogue(false);
       setCurrentSpeakingLine(0);
       setSpeakingResults([]);
       setSpeakingResult(null);
@@ -300,6 +305,47 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
 
     setTimeout(() => {
       setReadingSelectedOption(null);
+      setReadingInputValue('');
+      setReadingInputSubmitted(false);
+      setReadingInputIsCorrect(false);
+      if (currentReadingQ + 1 < examData.reading.length) {
+        setCurrentReadingQ(currentReadingQ + 1);
+      } else {
+        // Update srData
+        if (setSrData) {
+          const now = Date.now();
+          setSrData(prev => {
+            const next = { ...prev };
+            selectedWords.forEach(w => {
+              next[w.id] = {
+                ...(next[w.id] || { interval: 0, ease: 2.5, step: 0 }),
+                lastReviewDate: now
+              };
+            });
+            return next;
+          });
+        }
+        setPhase('results');
+      }
+    }, 1500);
+  };
+
+  const handleReadingSubmitInput = () => {
+    if (!readingInputValue.trim() || readingInputSubmitted) return;
+    
+    setReadingInputSubmitted(true);
+    const q = examData.reading[currentReadingQ];
+    const isCorrect = readingInputValue.trim().toLowerCase() === q.word.toLowerCase();
+    setReadingInputIsCorrect(isCorrect);
+    
+    const newAnswers = [...readingAnswers, { word: q.word, meaning: q.meaning, isCorrect, selected: null, typed: readingInputValue }];
+    setReadingAnswers(newAnswers);
+    
+    setTimeout(() => {
+      setReadingSelectedOption(null);
+      setReadingInputValue('');
+      setReadingInputSubmitted(false);
+      setReadingInputIsCorrect(false);
       if (currentReadingQ + 1 < examData.reading.length) {
         setCurrentReadingQ(currentReadingQ + 1);
       } else {
@@ -348,8 +394,8 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
     return (
       <div className="min-h-full flex items-center justify-center p-xl">
         <div className="bg-surface border border-hairline rounded-[16px] p-[40px] shadow-sm max-w-lg w-full flex flex-col items-center text-center">
-          <div className="w-24 h-24 bg-accent-purple/10 rounded-full flex items-center justify-center mb-xl shadow-inner border border-accent-purple/20">
-            <ClipboardCheck size={48} className="text-accent-purple" />
+          <div className="w-24 h-24 mb-md mx-auto rounded-full bg-surface-container-low flex items-center justify-center">
+            <ClipboardCheck size={48} className="text-primary" />
           </div>
 
           <h2 className="font-display-2 text-display-2 text-ink mb-sm tracking-tight">Kiểm tra tổng hợp</h2>
@@ -432,14 +478,25 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
         <div className="w-full max-w-3xl bg-surface border border-hairline rounded-[16px] p-lg md:p-xxl shadow-sm">
           {listeningStep === 'dialogue' ? (
             <>
-              <h3 className="font-heading-2 text-heading-2 text-ink mb-md">Nghe đoạn hội thoại</h3>
-              <p className="font-body-md text-body-md text-ink-muted mb-xl">
-                Bấm nút phát để nghe hội thoại, sau đó trả lời các câu hỏi.
-              </p>
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-xl gap-sm">
+                <div>
+                  <h3 className="font-heading-2 text-heading-2 text-ink mb-xs">Nghe đoạn hội thoại</h3>
+                  <p className="font-body-md text-body-md text-ink-muted">
+                    Bấm nút phát để nghe hội thoại, sau đó trả lời các câu hỏi.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setShowDialogue(!showDialogue)}
+                  className="px-md py-sm rounded-full border border-hairline hover:bg-surface-container-low transition-colors text-body-sm font-button text-ink whitespace-nowrap"
+                >
+                  {showDialogue ? 'Ẩn hội thoại' : 'Hiện hội thoại'}
+                </button>
+              </div>
 
               {/* Dialogue lines */}
-              <div className="flex flex-col gap-md mb-xl max-h-[360px] overflow-y-auto">
-                {dialogue.map((line, i) => {
+              {showDialogue ? (
+                <div className="flex flex-col gap-md mb-xl max-h-[360px] overflow-y-auto">
+                  {dialogue.map((line, i) => {
                   const styles = getSpeakerStyles(line.speaker);
                   return (
                     <div
@@ -471,6 +528,15 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
                   );
                 })}
               </div>
+              ) : (
+                <div className="flex items-center justify-center p-xl mb-xl border-2 border-dashed border-hairline rounded-[16px] bg-canvas-soft">
+                  <div className="text-center">
+                    <Headphones size={48} className="text-ink-muted mb-md mx-auto opacity-50" />
+                    <p className="text-body-md text-ink-muted font-medium">Đoạn hội thoại đã được ẩn</p>
+                    <p className="text-body-sm text-ink-muted opacity-70">Tập trung nghe để làm bài tốt hơn</p>
+                  </div>
+                </div>
+              )}
 
               {/* Controls */}
               <div className="flex flex-col sm:flex-row gap-sm">
@@ -792,51 +858,101 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
             {exampleWithBlank || '____'}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-md w-full mb-lg">
-            {q.options.map((opt, i) => {
-              const isSelected = readingSelectedOption === i;
-              const isCorrectAnswer = i === q.correctIndex;
-
-              let borderClass = "border-hairline hover:border-primary hover:bg-primary/5";
-              let bgClass = "bg-surface";
-              let textClass = "text-ink";
-              let badgeClass = "bg-surface-container-low text-primary";
-
-              if (readingSelectedOption !== null) {
-                if (isCorrectAnswer) {
-                  borderClass = "border-accent-green"; bgClass = "bg-accent-green/10"; textClass = "text-accent-green"; badgeClass = "bg-accent-green text-surface";
-                } else if (isSelected) {
-                  borderClass = "border-accent-orange"; bgClass = "bg-accent-orange/10"; textClass = "text-accent-orange"; badgeClass = "bg-accent-orange text-surface";
-                } else {
-                  borderClass = "border-hairline opacity-50"; badgeClass = "bg-surface-container-low text-ink-muted";
-                }
-              }
-
-              // Find meaning for this option
-              const optMeaning = examData.reading.find(r => r.word.toLowerCase() === opt.toLowerCase())?.meaning || '';
-
-              return (
+          {((difficulty === 'Trung bình' || difficulty === 'Khó') && currentReadingQ >= 3) ? (
+            <div className="w-full flex flex-col items-center">
+              <input
+                type="text"
+                autoFocus
+                placeholder="Nhập từ vựng tiếng Anh..."
+                value={readingInputValue}
+                onChange={(e) => setReadingInputValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleReadingSubmitInput();
+                }}
+                disabled={readingInputSubmitted}
+                className={`w-full max-w-sm text-center font-heading-2 text-heading-2 p-md border-2 rounded-[12px] outline-none transition-colors ${
+                  readingInputSubmitted
+                    ? readingInputIsCorrect
+                      ? 'border-accent-green bg-accent-green/10 text-accent-green'
+                      : 'border-accent-orange bg-accent-orange/10 text-accent-orange'
+                    : 'border-hairline bg-surface text-ink focus:border-primary focus:ring-2 focus:ring-primary/20'
+                }`}
+              />
+              
+              {!readingInputSubmitted ? (
                 <button
-                  key={i}
-                  onClick={() => handleSelectReadingAnswer(i)}
-                  disabled={readingSelectedOption !== null}
-                  className={`w-full border-2 rounded-[12px] p-md font-title text-title transition-colors shadow-sm text-left flex flex-col ${borderClass} ${bgClass}`}
+                  onClick={handleReadingSubmitInput}
+                  disabled={!readingInputValue.trim()}
+                  className="mt-md px-xl py-sm bg-primary text-on-primary font-button text-button rounded-full hover:bg-primary-active disabled:opacity-50 disabled:pointer-events-none transition-colors shadow-sm"
                 >
-                  <div className="flex items-center">
-                    <span className={`w-8 h-8 rounded-full flex items-center justify-center font-bold mr-md flex-shrink-0 shadow-sm ${badgeClass}`}>
-                      {['A', 'B', 'C', 'D'][i]}
+                  Kiểm tra
+                </button>
+              ) : (
+                <div className="mt-md text-center">
+                  {readingInputIsCorrect ? (
+                    <span className="font-bold text-accent-green flex items-center justify-center gap-xs">
+                      <CheckCircle2 size={20} /> Chính xác!
                     </span>
-                    <span className={textClass}>{opt}</span>
-                  </div>
-                  {readingSelectedOption !== null && (isCorrectAnswer || isSelected) && optMeaning && (
-                    <div className={`mt-sm ml-[48px] text-body-sm font-body-sm ${textClass}`}>
-                      {optMeaning}
+                  ) : (
+                    <div className="flex flex-col items-center">
+                      <span className="font-bold text-accent-orange flex items-center gap-xs mb-xs">
+                        <XCircle size={20} /> Chưa đúng!
+                      </span>
+                      <span className="text-body-md text-ink">
+                        Đáp án đúng là: <strong className="text-primary">{q.word}</strong>
+                      </span>
                     </div>
                   )}
-                </button>
-              );
-            })}
-          </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-md w-full mb-lg">
+              {q.options.map((opt, i) => {
+                const isSelected = readingSelectedOption === i;
+                const isCorrectAnswer = i === q.correctIndex;
+
+                let borderClass = "border-hairline hover:border-primary hover:bg-primary/5";
+                let bgClass = "bg-surface";
+                let textClass = "text-ink";
+                let badgeClass = "bg-surface-container-low text-primary";
+
+                if (readingSelectedOption !== null) {
+                  if (isCorrectAnswer) {
+                    borderClass = "border-accent-green"; bgClass = "bg-accent-green/10"; textClass = "text-accent-green"; badgeClass = "bg-accent-green text-surface";
+                  } else if (isSelected) {
+                    borderClass = "border-accent-orange"; bgClass = "bg-accent-orange/10"; textClass = "text-accent-orange"; badgeClass = "bg-accent-orange text-surface";
+                  } else {
+                    borderClass = "border-hairline opacity-50"; badgeClass = "bg-surface-container-low text-ink-muted";
+                  }
+                }
+
+                // Find meaning for this option
+                const optMeaning = examData.reading.find(r => r.word.toLowerCase() === opt.toLowerCase())?.meaning || '';
+
+                return (
+                  <button
+                    key={i}
+                    onClick={() => handleSelectReadingAnswer(i)}
+                    disabled={readingSelectedOption !== null}
+                    className={`w-full border-2 rounded-[12px] p-md font-title text-title transition-colors shadow-sm text-left flex flex-col ${borderClass} ${bgClass}`}
+                  >
+                    <div className="flex items-center">
+                      <span className={`w-8 h-8 rounded-full flex items-center justify-center font-bold mr-md flex-shrink-0 shadow-sm ${badgeClass}`}>
+                        {['A', 'B', 'C', 'D'][i]}
+                      </span>
+                      <span className={textClass}>{opt}</span>
+                    </div>
+                    {readingSelectedOption !== null && (isCorrectAnswer || isSelected) && optMeaning && (
+                      <div className={`mt-sm ml-[48px] text-body-sm font-body-sm ${textClass}`}>
+                        {optMeaning}
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     );

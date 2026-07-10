@@ -66,7 +66,7 @@ export function SpacedReview({ words, activeTopicId, topics, srData, setSrData, 
 
   // --- Phase: REVIEWING ---
   const currentWord = reviewQueue[currentIndex];
-  const currentSR = currentWord ? (srData[currentWord.id] || initSRState()) : initSRState();
+  const currentSR = currentWord ? { ...initSRState(), ...(srData[currentWord.id] || {}) } : initSRState();
 
   const handleFlip = () => {
     setIsFlipped(true);
@@ -151,8 +151,10 @@ export function SpacedReview({ words, activeTopicId, topics, srData, setSrData, 
   if (!activeTopicId || topicWords.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center p-xl">
-        <div className="text-center max-w-md">
-          <div className="text-6xl mb-lg">📚</div>
+        <div className="text-center max-w-md flex flex-col items-center">
+          <div className="w-24 h-24 mb-md rounded-full bg-surface-container-low flex items-center justify-center">
+            <BookOpen size={48} className="text-primary" />
+          </div>
           <h2 className="font-heading-2 text-heading-2 text-ink mb-sm">Chưa có từ vựng</h2>
           <p className="text-body-md text-on-surface-variant">
             Hãy chọn một chủ đề có từ vựng ở thanh bên trái để bắt đầu ôn tập.

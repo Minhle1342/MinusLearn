@@ -96,6 +96,20 @@ export async function generateImageForWord(wordStr, apiKeys = {}, apiIndex = 0) 
 export async function generateExamContent(wordList, apiKey, model, difficulty = 'Trung bình') {
   const wordSummary = wordList.map(w => `"${w.word}" (${w.meaning})`).join(', ');
 
+  let listeningDetail = "- Phần listening: Tạo đoạn hội thoại tự nhiên giữa 2-3 người, sử dụng tất cả từ vựng. Tạo 3-5 câu hỏi trắc nghiệm về nội dung.";
+  let speakingDetail = "- Phần speaking: Tạo tình huống hội thoại 2-3 người. Đánh dấu \"isUserTurn\": true cho các lượt mà người dùng sẽ đọc. Các lượt còn lại là NPC (isUserTurn: false). Sử dụng các từ vựng trong câu thoại.";
+  let readingDetail = "- Phần reading: Mỗi từ vựng tạo 1 câu ví dụ HOÀN TOÀN MỚI (khác với câu example có sẵn). Mảng options bao gồm 4 TỪ VỰNG TIẾNG ANH (tuyệt đối không dùng nghĩa tiếng Việt), trong đó luôn đặt từ vựng đúng ở correctIndex, 3 đáp án sai là các TỪ VỰNG TIẾNG ANH khác trong danh sách.";
+
+  if (difficulty === 'Trung bình') {
+    listeningDetail = "- Phần listening: Tạo đoạn hội thoại tự nhiên, sử dụng từ vựng. TẠO CHÍNH XÁC 6 CÂU HỎI trắc nghiệm về nội dung.";
+    speakingDetail = "- Phần speaking: Tạo tình huống hội thoại. Đánh dấu \"isUserTurn\": true cho các lượt người dùng đọc. TẠO CHÍNH XÁC 6 LƯỢT CỦA NGƯỜI DÙNG.";
+    readingDetail = "- Phần reading: Tạo CHÍNH XÁC 6 câu ví dụ MỚI. Nếu danh sách từ vựng ít hơn 6, HÃY LẶP LẠI từ vựng. Mảng options bao gồm 4 TỪ VỰNG TIẾNG ANH (không dùng nghĩa tiếng Việt), từ vựng đúng ở correctIndex.";
+  } else if (difficulty === 'Khó') {
+    listeningDetail = "- Phần listening: Tạo đoạn hội thoại tự nhiên, sử dụng từ vựng. TẠO CHÍNH XÁC 9 CÂU HỎI trắc nghiệm về nội dung.";
+    speakingDetail = "- Phần speaking: Tạo tình huống hội thoại. Đánh dấu \"isUserTurn\": true cho các lượt người dùng đọc. TẠO CHÍNH XÁC 9 LƯỢT CỦA NGƯỜI DÙNG.";
+    readingDetail = "- Phần reading: Tạo CHÍNH XÁC 9 câu ví dụ MỚI. Nếu danh sách từ vựng ít hơn 9, HÃY LẶP LẠI từ vựng. Mảng options bao gồm 4 TỪ VỰNG TIẾNG ANH (không dùng nghĩa tiếng Việt), từ vựng đúng ở correctIndex.";
+  }
+
   const prompt = `Bạn là một giáo viên tiếng Anh. Tôi đưa cho bạn danh sách từ vựng, hãy tạo một bài kiểm tra tiếng Anh gồm 3 phần với độ khó: ${difficulty.toUpperCase()}. Trả về JSON thuần (KHÔNG bọc trong markdown, KHÔNG dùng \`\`\`json).
 
 DANH SÁCH TỪ VỰNG: ${wordSummary}
@@ -119,14 +133,14 @@ Trả về JSON với cấu trúc sau:
     ]
   },
   "reading": [
-    { "word": "từ vựng gốc", "meaning": "nghĩa tiếng Việt", "newExample": "Câu ví dụ MỚI HOÀN TOÀN có chứa từ vựng này (KHÔNG dùng lại câu ví dụ có sẵn)", "options": ["đáp án đúng", "đáp án sai 1", "đáp án sai 2", "đáp án sai 3"], "correctIndex": 0 }
+    { "word": "từ vựng gốc", "meaning": "nghĩa tiếng Việt", "newExample": "Câu ví dụ MỚI HOÀN TOÀN có chứa từ vựng này (KHÔNG dùng lại câu ví dụ có sẵn)", "options": ["từ tiếng Anh đúng", "từ tiếng Anh sai 1", "từ tiếng Anh sai 2", "từ tiếng Anh sai 3"], "correctIndex": 0 }
   ]
 }
 
 CHI TIẾT:
-- Phần listening: Tạo đoạn hội thoại tự nhiên giữa 2-3 người, sử dụng tất cả từ vựng. Tạo 3-5 câu hỏi trắc nghiệm về nội dung.
-- Phần speaking: Tạo tình huống hội thoại 2-3 người. Đánh dấu "isUserTurn": true cho các lượt mà người dùng sẽ đọc. Các lượt còn lại là NPC (isUserTurn: false). Sử dụng các từ vựng trong câu thoại.
-- Phần reading: Mỗi từ vựng tạo 1 câu ví dụ HOÀN TOÀN MỚI (khác với câu example có sẵn). Mảng options luôn đặt đáp án đúng ở correctIndex, 3 đáp án sai là các từ vựng khác trong danh sách.`;
+${listeningDetail}
+${speakingDetail}
+${readingDetail}`;
 
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
     method: 'POST',
