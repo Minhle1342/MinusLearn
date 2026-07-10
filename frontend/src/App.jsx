@@ -22,7 +22,9 @@ function App() {
   const [settings, setSettings] = useLocalStorage('minuslearn_settings', {
     apiKey: GEMINI_DEFAULT_KEY,
     model: GEMINI_DEFAULT_MODEL,
-    imageModel: 'openai/gpt-image-2',
+    pixabayApiKey: '',
+    unsplashApiKey: '',
+    pexelsApiKey: '',
     fontSize: 'medium',
     fontStyle: 'inter',
     theme: 'current',

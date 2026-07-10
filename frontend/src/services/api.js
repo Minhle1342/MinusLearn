@@ -28,28 +28,69 @@ Danh sách từ: ${text}`;
   return newWords;
 }
 
-export async function generateImageForWord(wordStr, imageModel = 'openai/gpt-image-2') {
-  const prompt = `A beautiful minimal vector illustration representing the word "${wordStr}", clean background, vibrant colors`;
-  if (window.puter && window.puter.ai) {
-    const imgElement = await window.puter.ai.txt2img(prompt, { model: imageModel });
-    const tempUrl = imgElement.src;
+export async function generateImageForWord(wordStr, apiKeys = {}, apiIndex = 0) {
+  const { pixabayApiKey, unsplashApiKey, pexelsApiKey } = apiKeys;
 
-    // Convert temporary URL to persistent Base64 data URL
-    try {
-      const response = await fetch(tempUrl);
-      const blob = await response.blob();
-      return await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
-    } catch (e) {
-      console.warn('Base64 conversion failed, falling back to temp URL:', e);
-      return tempUrl;
+  const providers = [];
+  if (pixabayApiKey) providers.push({ id: 'pixabay', key: pixabayApiKey });
+  if (unsplashApiKey) providers.push({ id: 'unsplash', key: unsplashApiKey });
+  if (pexelsApiKey) providers.push({ id: 'pexels', key: pexelsApiKey });
+
+  if (providers.length === 0) {
+    throw new Error("Vui lòng cấu hình ít nhất một API Key (Pixabay, Unsplash hoặc Pexels) trong Cài đặt để tìm ảnh tự động.");
+  }
+  
+  const query = encodeURIComponent(wordStr);
+
+  for (let i = 0; i < providers.length; i++) {
+    const provider = providers[(apiIndex + i) % providers.length];
+
+    if (provider.id === 'pixabay') {
+      try {
+        const url = `https://pixabay.com/api/?key=${provider.key}&q=${query}&image_type=vector&per_page=5`;
+        const response = await fetch(url);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.hits && data.hits.length > 0) return data.hits[apiIndex % data.hits.length].webformatURL;
+          
+          const fallbackUrl = `https://pixabay.com/api/?key=${provider.key}&q=${query}&image_type=photo&per_page=5`;
+          const fallbackResponse = await fetch(fallbackUrl);
+          if (fallbackResponse.ok) {
+            const fallbackData = await fallbackResponse.json();
+            if (fallbackData.hits && fallbackData.hits.length > 0) return fallbackData.hits[apiIndex % fallbackData.hits.length].webformatURL;
+          }
+        }
+      } catch (e) {
+        console.warn("Pixabay fetch failed:", e);
+      }
+    } 
+    else if (provider.id === 'unsplash') {
+      try {
+        const url = `https://api.unsplash.com/search/photos?query=${query}&client_id=${provider.key}&per_page=5`;
+        const response = await fetch(url);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.results && data.results.length > 0) return data.results[apiIndex % data.results.length].urls.regular;
+        }
+      } catch (e) {
+        console.warn("Unsplash fetch failed:", e);
+      }
+    }
+    else if (provider.id === 'pexels') {
+      try {
+        const url = `https://api.pexels.com/v1/search?query=${query}&per_page=5`;
+        const response = await fetch(url, { headers: { Authorization: provider.key } });
+        if (response.ok) {
+          const data = await response.json();
+          if (data.photos && data.photos.length > 0) return data.photos[apiIndex % data.photos.length].src.large;
+        }
+      } catch (e) {
+        console.warn("Pexels fetch failed:", e);
+      }
     }
   }
-  throw new Error("Puter.js not loaded");
+
+  return null;
 }
 
 export async function generateExamContent(wordList, apiKey, model, difficulty = 'Trung bình') {

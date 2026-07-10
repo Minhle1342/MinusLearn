@@ -47,7 +47,7 @@ export function WordCard({ word, onEdit, viewMode = 'card', settings }) {
             {word.imageUrl ? (
               <>
                 <div className="absolute inset-0 bg-black/70 z-10 backdrop-blur-sm"></div>
-                <img src={word.imageUrl} alt={word.word} className="absolute inset-0 w-full h-full object-cover z-0" />
+                <img src={word.imageUrl} alt={word.word} referrerPolicy="no-referrer" className="absolute inset-0 w-full h-full object-cover z-0" />
               </>
             ) : (
               <div className="absolute inset-0 bg-surface z-0"></div>
@@ -95,7 +95,7 @@ export function WordCard({ word, onEdit, viewMode = 'card', settings }) {
     >
       <div className="h-40 w-full overflow-hidden bg-surface-container-lowest relative cursor-pointer" onClick={handleEditClick}>
         {word.imageUrl ? (
-          <img src={word.imageUrl} alt={word.word} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+          <img src={word.imageUrl} alt={word.word} referrerPolicy="no-referrer" className="w-full h-full object-contain transition-transform duration-500 group-hover:scale-105" />
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center text-on-surface-variant bg-surface-container">
             <span className="text-sm">No image</span>

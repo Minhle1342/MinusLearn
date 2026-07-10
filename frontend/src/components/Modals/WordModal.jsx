@@ -14,6 +14,7 @@ export function WordModal({ isOpen, onClose, wordToEdit, onSave, onDelete, activ
     imageUrl: ''
   });
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [imageApiIndex, setImageApiIndex] = useState(0);
 
   // AI form state
   const [aiText, setAiText] = useState('');
@@ -26,6 +27,7 @@ export function WordModal({ isOpen, onClose, wordToEdit, onSave, onDelete, activ
         setActiveTab('manual');
       } else {
         setFormData({ word: '', phonetic: '', meaning: '', example: '', imageUrl: '' });
+        setImageApiIndex(0);
         if (initialAiText) {
           setAiText(initialAiText);
           setActiveTab('ai');
@@ -55,7 +57,11 @@ export function WordModal({ isOpen, onClose, wordToEdit, onSave, onDelete, activ
       for (const w of words) {
         let imageUrl = '';
         try {
-          imageUrl = await generateImageForWord(w.word, settings.imageModel);
+          imageUrl = await generateImageForWord(w.word, { 
+            pixabayApiKey: settings.pixabayApiKey, 
+            unsplashApiKey: settings.unsplashApiKey, 
+            pexelsApiKey: settings.pexelsApiKey 
+          });
         } catch (e) {
           console.error("Image generation failed:", e);
         }
@@ -83,8 +89,13 @@ export function WordModal({ isOpen, onClose, wordToEdit, onSave, onDelete, activ
     if (!formData.word) return;
     setIsGeneratingImage(true);
     try {
-      const url = await generateImageForWord(formData.word, settings.imageModel);
+      const url = await generateImageForWord(formData.word, { 
+        pixabayApiKey: settings.pixabayApiKey, 
+        unsplashApiKey: settings.unsplashApiKey, 
+        pexelsApiKey: settings.pexelsApiKey 
+      }, imageApiIndex);
       setFormData({ ...formData, imageUrl: url });
+      setImageApiIndex(prev => prev + 1);
     } catch (e) {
       alert("Không thể tạo ảnh: " + e.message);
     } finally {
@@ -154,7 +165,7 @@ export function WordModal({ isOpen, onClose, wordToEdit, onSave, onDelete, activ
                     className="px-sm py-xs border border-hairline rounded-[8px] bg-surface flex items-center gap-2 hover:bg-surface-container disabled:opacity-50"
                   >
                     <ImageIcon size={16} />
-                    {isGeneratingImage ? 'Đang tạo...' : 'Tạo tự động'}
+                    {isGeneratingImage ? 'Đang tạo...' : (formData.imageUrl ? 'Tạo ảnh khác' : 'Tạo tự động')}
                   </button>
                 </div>
               </div>

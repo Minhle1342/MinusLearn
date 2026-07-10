@@ -268,7 +268,7 @@ export function SpacedReview({ words, activeTopicId, topics, srData, setSrData, 
               {/* Image */}
               {currentWord.imageUrl && (
                 <div className="w-32 h-32 mb-lg rounded-[12px] overflow-hidden border border-hairline">
-                  <img src={currentWord.imageUrl} alt={currentWord.word} className="w-full h-full object-cover" />
+                  <img src={currentWord.imageUrl} alt={currentWord.word} referrerPolicy="no-referrer" className="w-full h-full object-cover" />
                 </div>
               )}
 
