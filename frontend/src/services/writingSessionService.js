@@ -21,10 +21,11 @@ function _writeSessions(sessions) {
   localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
 }
 
-export function createSession({ taskType, bandTarget, prompt, visuals, outline, duration }) {
+export function createSession({ taskType, task1VisualKind, bandTarget, prompt, visuals, outline, duration }) {
   const session = {
     id: crypto.randomUUID(),
     taskType,
+    task1VisualKind: task1VisualKind || 'chart',
     bandTarget,
     prompt,
     visuals: visuals || [],

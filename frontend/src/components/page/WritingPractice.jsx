@@ -2,14 +2,21 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   PenLine, Clock, Send, RotateCcw, ChevronRight, ChevronLeft,
   CheckCircle2, XCircle, AlertCircle, Sparkles, BookOpen, Eye, EyeOff,
-  Lightbulb, Target, ArrowRight, X, FileText, Loader2
+  Lightbulb, Target, ArrowRight, X, FileText, Loader2,
+  BarChart3, Workflow, Map as MapIcon
 } from 'lucide-react';
-import { generateWritingPrompt, analyzeWritingPrompt, evaluateWritingSubmission } from '../../services/api';
+import {
+  generateWritingPrompt,
+  generateTask1SpatialPrompt,
+  analyzeWritingPrompt,
+  evaluateWritingSubmission,
+} from '../../services/api';
 import {
   createSession, updateSession, getLatestDraft, deleteSession,
   addSentenceMistake, getSentenceMistakes, clearSentenceMistakes
 } from '../../services/writingSessionService';
 import { WritingVisual } from './WritingVisual';
+import { inferTask1VisualKind, validateWritingVisuals } from '../../utils/writingVisuals';
 
 // ─── Helpers ─────────────────────────────────────────────────
 
@@ -26,6 +33,12 @@ function formatTime(seconds) {
 function countWords(text) {
   return text.trim().split(/\s+/).filter(Boolean).length;
 }
+
+const TASK1_VISUAL_OPTIONS = [
+  { id: 'chart', label: 'Biểu đồ & bảng', icon: BarChart3 },
+  { id: 'diagram', label: 'Process Diagram', icon: Workflow },
+  { id: 'map', label: 'Map', icon: MapIcon },
+];
 
 // ─── SentencePractice Sub-component ──────────────────────────
 
@@ -291,6 +304,7 @@ export function WritingPractice({ words, topics, activeTopicId, settings, onOpen
 
   // Setup state
   const [taskType, setTaskType] = useState('2');
+  const [task1VisualKind, setTask1VisualKind] = useState('chart');
   const [bandTarget, setBandTarget] = useState(6.5);
   const [duration, setDuration] = useState(40);       // in minutes
   const [customPrompt, setCustomPrompt] = useState('');
@@ -335,6 +349,7 @@ export function WritingPractice({ words, topics, activeTopicId, settings, onOpen
         setVisuals(draft.visuals || []);
         setEssay(draft.essay || '');
         setTaskType(draft.taskType);
+        setTask1VisualKind(draft.task1VisualKind || inferTask1VisualKind(draft.visuals));
         setBandTarget(draft.bandTarget);
         setTimeLeft(remaining);
         setMode('ai');
@@ -379,6 +394,28 @@ export function WritingPractice({ words, topics, activeTopicId, settings, onOpen
     return () => clearInterval(autoSaveRef.current);
   }, [phase, sessionId, essay]);
 
+  const handleTaskTypeChange = (nextTaskType) => {
+    if (nextTaskType === taskType) return;
+    setTaskType(nextTaskType);
+    setCustomPrompt('');
+    setVisuals([]);
+    setError('');
+  };
+
+  const handleVisualKindChange = (nextVisualKind) => {
+    if (nextVisualKind === task1VisualKind) return;
+    setTask1VisualKind(nextVisualKind);
+    setCustomPrompt('');
+    setVisuals([]);
+    setError('');
+  };
+
+  const handleCustomPromptChange = (value) => {
+    setCustomPrompt(value);
+    if (visuals.length > 0) setVisuals([]);
+    setError('');
+  };
+
   // ── Generate random prompt ──
   const handleGeneratePrompt = async () => {
     const apiKey = settings.apiKey;
@@ -389,13 +426,25 @@ export function WritingPractice({ words, topics, activeTopicId, settings, onOpen
     setGeneratingPrompt(true);
     setError('');
     try {
-      const wordHints = topicWords.slice(0, 15).map(w => w.word);
-      const result = await generateWritingPrompt(
-        { topicName: currentTopic?.name, taskType, bandTarget, wordHints },
-        apiKey, settings.model
-      );
+      const wordHints = topicWords.map(w => w.word);
+      const result = taskType === '1' && task1VisualKind !== 'chart'
+        ? await generateTask1SpatialPrompt(
+          { topicName: currentTopic?.name, bandTarget, wordHints, visualKind: task1VisualKind },
+          apiKey,
+          settings.model
+        )
+        : await generateWritingPrompt(
+          { topicName: currentTopic?.name, taskType, bandTarget, wordHints },
+          apiKey,
+          settings.model
+        );
+
+      if (taskType === '1') {
+        const validation = validateWritingVisuals(result.visuals, task1VisualKind);
+        if (!validation.valid) throw new Error(validation.error);
+      }
       setCustomPrompt(result.prompt);
-      setVisuals(result.visuals || []);
+      setVisuals(taskType === '1' ? result.visuals : []);
     } catch (err) {
       setError(err.message || 'Lỗi khi tạo đề.');
     } finally {
@@ -407,15 +456,18 @@ export function WritingPractice({ words, topics, activeTopicId, settings, onOpen
   const handleStartPractice = async () => {
     const prompt = customPrompt.trim();
     if (!prompt) { setError('Vui lòng nhập đề hoặc tạo đề ngẫu nhiên.'); return; }
-    if (taskType === '1' && visuals.length === 0) {
-      setError('Đề Task 1 cần có biểu đồ. Vui lòng bấm "Tạo đề ngẫu nhiên"!');
-      return;
+    if (taskType === '1') {
+      const validation = validateWritingVisuals(visuals, task1VisualKind);
+      if (!validation.valid) {
+        setError(`${validation.error} Hãy tạo đề ngẫu nhiên để AI sinh đề và visual đồng bộ.`);
+        return;
+      }
     }
     setError('');
 
     const durationSec = duration * 60;
     const session = createSession({
-      taskType, bandTarget, prompt, visuals, outline: '', duration: durationSec,
+      taskType, task1VisualKind, bandTarget, prompt, visuals, outline: '', duration: durationSec,
     });
     setSessionId(session.id);
     setWritingPrompt(prompt);
@@ -486,6 +538,7 @@ export function WritingPractice({ words, topics, activeTopicId, settings, onOpen
     setSessionId(null);
     setWritingPrompt('');
     setCustomPrompt('');
+    setTask1VisualKind('chart');
     setVisuals([]);
     setOutline([]);
     setSuggestedVocab([]);
@@ -861,7 +914,7 @@ export function WritingPractice({ words, topics, activeTopicId, settings, onOpen
                   {['1', '2'].map(t => (
                     <button
                       key={t}
-                      onClick={() => setTaskType(t)}
+                      onClick={() => handleTaskTypeChange(t)}
                       className={`flex-1 py-sm rounded-[8px] font-button text-button border transition-colors ${
                         taskType === t ? 'bg-primary text-on-primary border-primary' : 'bg-surface border-hairline text-ink hover:bg-canvas-soft'
                       }`}
@@ -880,7 +933,7 @@ export function WritingPractice({ words, topics, activeTopicId, settings, onOpen
                   onChange={e => setBandTarget(parseFloat(e.target.value))}
                   className="w-full px-md py-sm bg-surface border border-hairline rounded-[8px] font-body-md text-body-md text-ink focus:outline-none focus:ring-2 focus:ring-primary"
                 >
-                  {[5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0].map(b => (
+                  {[4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0, 7.5, 8.0].map(b => (
                     <option key={b} value={b}>Band {b}</option>
                   ))}
                 </select>
@@ -905,12 +958,40 @@ export function WritingPractice({ words, topics, activeTopicId, settings, onOpen
               </div>
             </div>
 
+            {taskType === '1' && (
+              <div className="mb-lg">
+                <label className="block text-body-sm font-button text-ink-muted mb-xs">Dạng visual Task 1</label>
+                <div className="grid grid-cols-3 gap-xxs rounded-lg border border-hairline bg-canvas-soft p-xxs">
+                  {TASK1_VISUAL_OPTIONS.map(option => {
+                    const Icon = option.icon;
+                    const selected = task1VisualKind === option.id;
+                    return (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => handleVisualKindChange(option.id)}
+                        aria-pressed={selected}
+                        className={`min-h-[52px] px-xs py-xs rounded-[6px] border font-button text-caption md:text-body-sm leading-tight transition-colors flex items-center justify-center gap-xxs ${
+                          selected
+                            ? 'bg-surface text-primary border-primary shadow-sm'
+                            : 'bg-transparent text-ink-secondary border-transparent hover:bg-surface'
+                        }`}
+                      >
+                        <Icon size={16} className="shrink-0" />
+                        <span>{option.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Custom prompt */}
             <div className="mb-lg">
               <label className="block text-body-sm font-button text-ink-muted mb-xs">Đề bài</label>
               <textarea
                 value={customPrompt}
-                onChange={e => setCustomPrompt(e.target.value)}
+                onChange={e => handleCustomPromptChange(e.target.value)}
                 rows={4}
                 placeholder="Nhập đề IELTS Writing hoặc bấm nút tạo đề ngẫu nhiên bên dưới..."
                 className="w-full px-md py-sm bg-canvas border border-hairline rounded-[8px] font-body-md text-body-md text-ink focus:outline-none focus:ring-2 focus:ring-primary resize-none placeholder:text-ink-faint"
@@ -930,6 +1011,12 @@ export function WritingPractice({ words, topics, activeTopicId, settings, onOpen
               <p className="text-body-sm text-ink-muted">
                 <span className="font-button text-ink">Chủ đề:</span> {currentTopic?.name || 'Chưa chọn'} •{' '}
                 <span className="font-button text-ink">Từ vựng:</span> {topicWords.length} từ
+                {taskType === '1' && (
+                  <>
+                    {' '}• <span className="font-button text-ink">Visual:</span>{' '}
+                    {TASK1_VISUAL_OPTIONS.find(option => option.id === task1VisualKind)?.label}
+                  </>
+                )}
               </p>
             </div>
 

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ResponsiveContainer,
   LineChart, Line,
@@ -6,7 +6,10 @@ import {
   PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, Legend, CartesianGrid
 } from 'recharts';
-import { AlertCircle } from 'lucide-react';
+import { AlertCircle, Maximize2, X } from 'lucide-react';
+import { WritingDiagram } from './WritingDiagram';
+import { WritingMap } from './WritingMap';
+import { validateWritingVisuals } from '../../utils/writingVisuals';
 
 const COLORS = [
   '#3B82F6', // primary blue
@@ -19,7 +22,32 @@ const COLORS = [
   '#64748B', // slate
 ];
 
+function SpatialVisual({ visual, expanded = false }) {
+  const validation = validateWritingVisuals([visual], visual.type);
+  if (!validation.valid) {
+    return (
+      <div className="bg-error/5 border border-error/20 rounded-lg p-md flex items-start gap-sm">
+        <AlertCircle size={18} className="text-error mt-0.5 shrink-0" />
+        <p className="text-body-sm text-error">{validation.error}</p>
+      </div>
+    );
+  }
+  if (visual.type === 'diagram') return <WritingDiagram visual={visual} expanded={expanded} />;
+  return <WritingMap visual={visual} expanded={expanded} />;
+}
+
 export function WritingVisual({ visuals }) {
+  const [expandedVisual, setExpandedVisual] = useState(null);
+
+  useEffect(() => {
+    if (!expandedVisual) return undefined;
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') setExpandedVisual(null);
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [expandedVisual]);
+
   if (!visuals || !Array.isArray(visuals) || visuals.length === 0) {
     return (
       <div className="bg-error/5 border border-error/20 rounded-lg p-md flex items-start gap-sm">
@@ -35,11 +63,23 @@ export function WritingVisual({ visuals }) {
   }
 
   return (
-    <div className="space-y-xl w-full">
-      {visuals.map((visual, index) => (
-        <div key={visual.id || index} className="bg-surface border border-hairline rounded-lg p-lg shadow-sm">
+    <>
+      <div className="space-y-xl w-full">
+        {visuals.map((visual, index) => (
+        <div key={visual.id || index} className="relative bg-surface border border-hairline rounded-lg p-lg shadow-sm">
+          {(visual.type === 'diagram' || visual.type === 'map') && (
+            <button
+              type="button"
+              onClick={() => setExpandedVisual(visual)}
+              className="absolute right-sm top-sm z-10 flex h-8 w-8 items-center justify-center rounded-lg border border-hairline bg-surface text-ink-muted hover:text-primary transition-colors"
+              aria-label="Mở rộng visual"
+              title="Mở rộng visual"
+            >
+              <Maximize2 size={16} />
+            </button>
+          )}
           {visual.title && (
-            <h3 className="text-heading-3 font-heading-3 text-ink mb-md text-center">
+            <h3 className={`text-heading-3 font-heading-3 text-ink mb-md text-center ${(visual.type === 'diagram' || visual.type === 'map') ? 'px-xl' : ''}`}>
               {visual.title}
             </h3>
           )}
@@ -169,13 +209,51 @@ export function WritingVisual({ visuals }) {
             </div>
           )}
 
-          {visual.unit && visual.type !== 'pie' && (
+          {(visual.type === 'diagram' || visual.type === 'map') && (
+            <SpatialVisual visual={visual} />
+          )}
+
+          {visual.unit && !['pie', 'diagram', 'map'].includes(visual.type) && (
             <p className="text-body-sm text-ink-muted text-center mt-sm italic">
               Đơn vị: {visual.unit}
             </p>
           )}
         </div>
-      ))}
-    </div>
+        ))}
+      </div>
+
+      {expandedVisual && (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-md"
+          role="dialog"
+          aria-modal="true"
+          aria-label={expandedVisual.title || 'Task 1 visual'}
+          onMouseDown={event => {
+            if (event.target === event.currentTarget) setExpandedVisual(null);
+          }}
+        >
+          <div className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-lg border border-hairline bg-surface shadow-2xl">
+            <div className="flex items-center justify-between gap-md border-b border-hairline px-lg py-sm">
+              <h2 className="min-w-0 text-title font-title text-ink break-words">
+                {expandedVisual.title || 'Task 1 visual'}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setExpandedVisual(null)}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-ink-muted hover:bg-canvas-soft hover:text-ink transition-colors"
+                aria-label="Đóng visual"
+                title="Đóng"
+                autoFocus
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto p-lg">
+              <SpatialVisual visual={expandedVisual} expanded />
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
