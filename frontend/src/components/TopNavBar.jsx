@@ -7,6 +7,7 @@ export function TopNavBar({ wordCount, activePage, setActivePage, onOpenDrawer, 
     { id: 'listening', label: 'Luyện nghe' },
     { id: 'reading', label: 'Đọc - hiểu' },
     { id: 'speaking', label: 'Luyện nói' },
+    { id: 'writing', label: 'Luyện viết' },
     { id: 'exam', label: 'Kiểm tra' },
     { id: 'review', label: 'Ôn ngắt quãng' },
   ];

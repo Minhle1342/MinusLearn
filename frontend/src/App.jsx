@@ -12,6 +12,7 @@ import { ListeningPractice } from './components/page/ListeningPractice';
 import { ReadingPractice } from './components/page/ReadingPractice';
 import { SpacedReview } from './components/page/SpacedReview';
 import { SpeakingPractice } from './components/page/SpeakingPractice';
+import { WritingPractice } from './components/page/WritingPractice';
 import { ExamPage } from './components/page/ExamPage';
 
 function App() {
@@ -275,6 +276,16 @@ function App() {
                   onOpenSettings={() => setIsSettingsModalOpen(true)}
                   setSrData={setSrData}
                 />
+            </div>
+          ) : activePage === 'writing' ? (
+            <div className="flex-1 overflow-y-auto bg-canvas-soft">
+              <WritingPractice
+                words={words}
+                topics={topics}
+                activeTopicId={activeTopicId}
+                settings={settings}
+                onOpenSettings={() => setIsSettingsModalOpen(true)}
+              />
             </div>
           ) : activePage === 'exam' ? (
             <div className="flex-1 overflow-y-auto bg-canvas-soft">
