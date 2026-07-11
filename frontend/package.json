@@ -8,6 +8,7 @@
     "build": "vite build",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
     "test:writing-visuals": "node --test src/utils/writingVisuals.test.js",
+    "test:exam-writing": "node --test src/utils/examWriting.test.js",
     "preview": "vite preview"
   },
   "dependencies": {

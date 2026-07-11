@@ -1,4 +1,9 @@
 import { serializeWritingVisualsForAI, validateWritingVisuals } from '../utils/writingVisuals';
+import {
+  calculateOverallWritingBand,
+  normalizeExamWritingEvaluation,
+  validateExamWritingContent,
+} from '../utils/examWriting';
 
 export const GEMINI_DEFAULT_KEY = import.meta.env.VITE_GEMINI_DEFAULT_KEY || "";
 export const GEMINI_DEFAULT_MODEL = import.meta.env.VITE_GEMINI_DEFAULT_MODEL || "gemini-3.1-flash-lite-preview";
@@ -169,6 +174,157 @@ QUY TẮC:
   }
 
   return examData;
+}
+
+const EXAM_WRITING_SYSTEM_INSTRUCTION = `You are an IELTS Academic Writing test writer.
+Create one original IELTS Academic Writing test. Do not copy official Cambridge/IELTS sample questions.
+Return ONLY one JSON object:
+{
+  "instructions": "Short Vietnamese instruction for the candidate",
+  "rubricWeights": { "task1": 1, "task2": 2 },
+  "tasks": [
+    {
+      "taskType": "1",
+      "timeMinutes": 20,
+      "minWords": 150,
+      "prompt": "Standard IELTS Academic Task 1 prompt",
+      "visuals": [<one visual>]
+    },
+    {
+      "taskType": "2",
+      "timeMinutes": 40,
+      "minWords": 250,
+      "prompt": "Standard IELTS Academic Task 2 prompt"
+    }
+  ]
+}
+Task 1 visual may be one of these existing app schemas:
+- line/bar: {"id","type":"line|bar","title","unit","xKey","series":[{"key","name"}],"data":[{...}]}
+- pie: {"id","type":"pie","title","unit","nameKey","valueKey","data":[{...}]}
+- table: {"id","type":"table","title","columns":["..."],"rows":[["..."]]}
+- diagram: {"id","type":"diagram","title","layout":"linear|cycle|branch","nodes":[{"id","label","detail","role":"input|process|output","row","column"}],"edges":[{"from","to","label"}]}
+- map: {"id","type":"map","title","baseFeatures":[],"states":[{"id","label","features":[]}],"legend":[{"category","label"}]}
+Map feature shapes:
+- area: {"id","kind":"area","category","label","points":[[x,y]]}
+- building: {"id","kind":"building","category","label","x","y","width","height"}
+- route: {"id","kind":"route","category","label","points":[[x,y]]}
+- marker: {"id","kind":"marker","category","label","x","y"}
+Rules:
+- Use Academic Writing only, not General Training letters.
+- Task 1 prompt and visual must match exactly.
+- Use 2-4 data series or categories for charts/tables.
+- Diagram max 12 nodes and 16 edges. Branch nodes need row/column 0-5.
+- Map has 2-3 states, coordinates 0-100, max 20 features per state including base features.
+- Do not include colors, SVG, HTML, URLs, base64, or image data.`;
+
+export async function generateExamWritingContent({ wordList = [], topicName = 'General', difficulty = 'Trung bình' }, apiKey, model) {
+  const wordSummary = wordList
+    .slice(0, 12)
+    .map(w => `${w.word}:${w.meaning}`)
+    .join('|');
+  const prompt = `Topic: ${topicName || 'General'}
+Difficulty label: ${difficulty}
+Optional vocabulary context: ${wordSummary || 'None'}
+Generate the full IELTS Academic Writing test now.`;
+
+  const result = await callGeminiJson({
+    apiKey,
+    model,
+    systemInstruction: EXAM_WRITING_SYSTEM_INSTRUCTION,
+    prompt,
+    generationConfig: { temperature: 0.8 },
+  });
+
+  const validation = validateExamWritingContent(result);
+  if (!validation.valid) {
+    throw new Error(`AI trả về bài Writing không hợp lệ: ${validation.error}`);
+  }
+
+  return {
+    instructions: result.instructions || 'Hoàn thành Task 1 và Task 2 trong 60 phút.',
+    rubricWeights: { task1: 1, task2: 2, ...(result.rubricWeights || {}) },
+    tasks: result.tasks,
+  };
+}
+
+const EXAM_WRITING_EVALUATION_SYSTEM_INSTRUCTION = `You are a strict senior IELTS Writing examiner.
+Evaluate IELTS Academic Writing Task 1 and Task 2 using official IELTS Writing criteria:
+- Task Achievement for Task 1 / Task Response for Task 2
+- Coherence & Cohesion
+- Lexical Resource
+- Grammatical Range & Accuracy
+Task 2 carries twice the weight of Task 1.
+Return ONLY one JSON object:
+{
+  "task1Band": <number>,
+  "task2Band": <number>,
+  "overallWritingBand": <number>,
+  "taskReports": [
+    {
+      "taskType": "1",
+      "criteria": [
+        {"name":"Task Achievement","band":<number>,"comment":"Vietnamese"},
+        {"name":"Coherence & Cohesion","band":<number>,"comment":"Vietnamese"},
+        {"name":"Lexical Resource","band":<number>,"comment":"Vietnamese"},
+        {"name":"Grammatical Range & Accuracy","band":<number>,"comment":"Vietnamese"}
+      ]
+    },
+    {
+      "taskType": "2",
+      "criteria": [
+        {"name":"Task Response","band":<number>,"comment":"Vietnamese"},
+        {"name":"Coherence & Cohesion","band":<number>,"comment":"Vietnamese"},
+        {"name":"Lexical Resource","band":<number>,"comment":"Vietnamese"},
+        {"name":"Grammatical Range & Accuracy","band":<number>,"comment":"Vietnamese"}
+      ]
+    }
+  ],
+  "summary": "Vietnamese overall feedback",
+  "strengths": ["Vietnamese"],
+  "weaknesses": ["Vietnamese"],
+  "highlights": [{"taskType":"1|2","text":"exact essay substring","type":"grammar|clarity|lexical|cohesion|task","explanation":"Vietnamese","rewrites":["..."]}],
+  "upgradedRewrites": [{"taskType":"1|2","original":"exact sentence","upgraded":"higher-band rewrite","explanation":"Vietnamese"}]
+}
+Rules:
+- Bands must be multiples of 0.5 from 0 to 9.
+- Penalize responses under 150 words for Task 1 and under 250 words for Task 2.
+- Give concise Vietnamese feedback.`;
+
+export async function evaluateExamWritingSubmission({ tasks, answers }, apiKey, model) {
+  const task1 = tasks?.[0] || {};
+  const task2 = tasks?.[1] || {};
+  const task1VisualSummary = serializeWritingVisualsForAI(task1.visuals);
+  const userPrompt = `TASK 1 PROMPT:
+${task1.prompt || ''}
+
+TASK 1 VISUAL SUMMARY:
+${task1VisualSummary || 'No visual summary'}
+
+TASK 1 ESSAY:
+${answers?.[0] || ''}
+
+TASK 2 PROMPT:
+${task2.prompt || ''}
+
+TASK 2 ESSAY:
+${answers?.[1] || ''}
+
+Evaluate both tasks now.`;
+
+  const result = await callGeminiJson({
+    apiKey,
+    model,
+    systemInstruction: EXAM_WRITING_EVALUATION_SYSTEM_INSTRUCTION,
+    prompt: userPrompt,
+    generationConfig: { temperature: 0.2 },
+  });
+
+  const normalized = normalizeExamWritingEvaluation(result);
+  return {
+    ...normalized,
+    overallWritingBand: normalized.overallWritingBand
+      || calculateOverallWritingBand(normalized.task1Band, normalized.task2Band),
+  };
 }
 
 export async function generateSpeakingScenario(wordList, topicName, apiKey, model) {

@@ -1,15 +1,29 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   CheckCircle2, XCircle, Volume2, Mic, Square, RotateCcw,
-  ClipboardCheck, Headphones, BookOpen, MessageSquare, Loader2, ChevronRight, Lightbulb
+  ClipboardCheck, Headphones, BookOpen, MessageSquare, Loader2, ChevronRight, Lightbulb,
+  PenLine, Clock3, FileText, AlertTriangle
 } from 'lucide-react';
-import { generateExamContent } from '../../services/api';
+import {
+  evaluateExamWritingSubmission,
+  generateExamContent,
+  generateExamWritingContent,
+} from '../../services/api';
 import { speakEnglishText, getEnglishVoices, getSelectedEnglishVoice } from '../../utils/speech';
 import {
   createPronunciationAssessmentSession,
   FALLBACK_SIMILARITY_THRESHOLD,
   hasSpeechRecognitionSupport,
 } from '../../services/speechAssessment';
+import { WritingVisual } from './WritingVisual';
+import {
+  EXAM_WRITING_DRAFT_KEY,
+  EXAM_WRITING_TASK1_SECONDS,
+  EXAM_WRITING_TASKS,
+  EXAM_WRITING_TOTAL_SECONDS,
+  countWords,
+  formatWritingTime,
+} from '../../utils/examWriting';
 
 function shuffleArray(arr) {
   return [...arr].sort(() => 0.5 - Math.random());
@@ -42,6 +56,7 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
 
   // ── Setup state ──
   const [difficulty, setDifficulty] = useState('Trung bình'); // Dễ, Trung bình, Khó
+  const [includeWritingTest, setIncludeWritingTest] = useState(true);
 
   // ── Listening state ──
   const [listeningStep, setListeningStep] = useState('dialogue'); // dialogue | questions
@@ -61,6 +76,7 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
   const [speakingError, setSpeakingError] = useState('');
   const sessionRef = useRef(null);
   const chatEndRef = useRef(null);
+  const writingDraftRef = useRef(null);
   const [speakerVoiceMap, setSpeakerVoiceMap] = useState({});
 
   // ── Reading state ──
@@ -71,6 +87,15 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
   const [readingInputSubmitted, setReadingInputSubmitted] = useState(false);
   const [readingInputIsCorrect, setReadingInputIsCorrect] = useState(false);
   const [showReadingHint, setShowReadingHint] = useState(false);
+
+  // ── Writing state ──
+  const [writingTaskIndex, setWritingTaskIndex] = useState(0);
+  const [writingAnswers, setWritingAnswers] = useState(['', '']);
+  const [writingEvaluation, setWritingEvaluation] = useState(null);
+  const [writingTimeLeft, setWritingTimeLeft] = useState(EXAM_WRITING_TOTAL_SECONDS);
+  const [isWritingLocked, setIsWritingLocked] = useState(false);
+  const [isEvaluatingWriting, setIsEvaluatingWriting] = useState(false);
+  const [writingSubmitError, setWritingSubmitError] = useState('');
 
   // ── Derived ──
   const selectedWords = useMemo(
@@ -101,22 +126,122 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
     }
   }, [currentSpeakingLine, phase]);
 
+  // ── Restore an interrupted Writing phase ──
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(EXAM_WRITING_DRAFT_KEY);
+      if (!raw) return;
+      const draft = JSON.parse(raw);
+      if (!draft?.examData?.writing?.tasks || !Array.isArray(draft.writingAnswers)) return;
+
+      setExamData(draft.examData);
+      setDifficulty(draft.difficulty || 'Trung bình');
+      setIncludeWritingTest(true);
+      setListeningAnswers(draft.listeningAnswers || []);
+      setSpeakingResults(draft.speakingResults || []);
+      setReadingAnswers(draft.readingAnswers || []);
+      setWritingTaskIndex(draft.writingTaskIndex || 0);
+      setWritingAnswers([
+        draft.writingAnswers[0] || '',
+        draft.writingAnswers[1] || '',
+      ]);
+      setWritingTimeLeft(Math.max(0, draft.writingTimeLeft || 0));
+      setIsWritingLocked(Boolean(draft.isWritingLocked) || (draft.writingTimeLeft || 0) <= 0);
+      setWritingSubmitError('');
+      setPhase('writing');
+    } catch {
+      localStorage.removeItem(EXAM_WRITING_DRAFT_KEY);
+    }
+  }, []);
+
+  // ── Writing timer ──
+  useEffect(() => {
+    if (phase !== 'writing' || isWritingLocked) return undefined;
+    const timer = setInterval(() => {
+      setWritingTimeLeft(prev => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [phase, isWritingLocked]);
+
+  useEffect(() => {
+    if (phase !== 'writing') return;
+    if (writingTimeLeft <= EXAM_WRITING_TASK1_SECONDS && writingTaskIndex === 0) {
+      setWritingTaskIndex(1);
+    }
+    if (writingTimeLeft <= 0 && !isWritingLocked) {
+      setIsWritingLocked(true);
+    }
+  }, [phase, writingTimeLeft, writingTaskIndex, isWritingLocked]);
+
+  useEffect(() => {
+    if (phase !== 'writing') return;
+    writingDraftRef.current = {
+      savedAt: Date.now(),
+      phase,
+      examData,
+      difficulty,
+      includeWritingTest,
+      listeningAnswers,
+      speakingResults,
+      readingAnswers,
+      writingTaskIndex,
+      writingAnswers,
+      writingTimeLeft,
+      isWritingLocked,
+    };
+  }, [
+    phase,
+    examData,
+    difficulty,
+    includeWritingTest,
+    listeningAnswers,
+    speakingResults,
+    readingAnswers,
+    writingTaskIndex,
+    writingAnswers,
+    writingTimeLeft,
+    isWritingLocked,
+  ]);
+
+  useEffect(() => {
+    if (phase !== 'writing') return undefined;
+    const persistDraft = () => {
+      if (writingDraftRef.current) {
+        localStorage.setItem(EXAM_WRITING_DRAFT_KEY, JSON.stringify(writingDraftRef.current));
+      }
+    };
+    persistDraft();
+    const timer = setInterval(persistDraft, 10000);
+    return () => clearInterval(timer);
+  }, [phase]);
+
   // ═══════════════════════════════════════
   //  SETUP PHASE
   // ═══════════════════════════════════════
   const handleStartExam = async () => {
     if (selectedWords.length === 0) return;
+    if (!settings.apiKey || !settings.model) {
+      setError('Vui lòng cấu hình API Key và model trong Cài đặt trước khi tạo bài kiểm tra.');
+      return;
+    }
     setPhase('loading');
     setError('');
 
     try {
-      const data = await generateExamContent(
-        selectedWords.map(w => ({ word: w.word, meaning: w.meaning, example: w.example })),
-        settings.apiKey,
-        settings.model,
-        difficulty
-      );
+      const examWords = selectedWords.map(w => ({ word: w.word, meaning: w.meaning, example: w.example }));
+      const [baseExamData, writingData] = await Promise.all([
+        generateExamContent(examWords, settings.apiKey, settings.model, difficulty),
+        includeWritingTest
+          ? generateExamWritingContent({
+              wordList: examWords,
+              topicName: activeTopic?.name || 'General',
+              difficulty,
+            }, settings.apiKey, settings.model)
+          : Promise.resolve(null),
+      ]);
+      const data = writingData ? { ...baseExamData, writing: writingData } : baseExamData;
       setExamData(data);
+      localStorage.removeItem(EXAM_WRITING_DRAFT_KEY);
 
       // Build speaker→voice map for both listening and speaking sections
       const voices = getEnglishVoices();
@@ -152,6 +277,13 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
       setReadingAnswers([]);
       setReadingSelectedOption(null);
       setShowReadingHint(false);
+      setWritingTaskIndex(0);
+      setWritingAnswers(['', '']);
+      setWritingEvaluation(null);
+      setWritingTimeLeft(EXAM_WRITING_TOTAL_SECONDS);
+      setIsWritingLocked(false);
+      setIsEvaluatingWriting(false);
+      setWritingSubmitError('');
 
       setPhase('listening');
     } catch (err) {
@@ -294,6 +426,34 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
     }
   };
 
+  const finishReadingSection = () => {
+    if (setSrData) {
+      const now = Date.now();
+      setSrData(prev => {
+        const next = { ...prev };
+        selectedWords.forEach(w => {
+          next[w.id] = {
+            ...(next[w.id] || { interval: 0, ease: 2.5, step: 0 }),
+            lastReviewDate: now
+          };
+        });
+        return next;
+      });
+    }
+
+    if (includeWritingTest && examData?.writing?.tasks?.length === 2) {
+      setWritingTaskIndex(0);
+      setWritingAnswers(['', '']);
+      setWritingEvaluation(null);
+      setWritingTimeLeft(EXAM_WRITING_TOTAL_SECONDS);
+      setIsWritingLocked(false);
+      setWritingSubmitError('');
+      setPhase('writing');
+    } else {
+      setPhase('results');
+    }
+  };
+
   // ═══════════════════════════════════════
   //  READING PHASE
   // ═══════════════════════════════════════
@@ -314,21 +474,7 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
       if (currentReadingQ + 1 < examData.reading.length) {
         setCurrentReadingQ(currentReadingQ + 1);
       } else {
-        // Update srData
-        if (setSrData) {
-          const now = Date.now();
-          setSrData(prev => {
-            const next = { ...prev };
-            selectedWords.forEach(w => {
-              next[w.id] = {
-                ...(next[w.id] || { interval: 0, ease: 2.5, step: 0 }),
-                lastReviewDate: now
-              };
-            });
-            return next;
-          });
-        }
-        setPhase('results');
+        finishReadingSection();
       }
     }, 1500);
   };
@@ -353,23 +499,48 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
       if (currentReadingQ + 1 < examData.reading.length) {
         setCurrentReadingQ(currentReadingQ + 1);
       } else {
-        // Update srData
-        if (setSrData) {
-          const now = Date.now();
-          setSrData(prev => {
-            const next = { ...prev };
-            selectedWords.forEach(w => {
-              next[w.id] = {
-                ...(next[w.id] || { interval: 0, ease: 2.5, step: 0 }),
-                lastReviewDate: now
-              };
-            });
-            return next;
-          });
-        }
-        setPhase('results');
+        finishReadingSection();
       }
     }, 1500);
+  };
+
+  // ═══════════════════════════════════════
+  //  WRITING PHASE
+  // ═══════════════════════════════════════
+  const handleWritingAnswerChange = value => {
+    setWritingAnswers(prev => {
+      const next = [...prev];
+      next[writingTaskIndex] = value;
+      return next;
+    });
+  };
+
+  const handleSubmitWritingExam = async () => {
+    if (isEvaluatingWriting) return;
+    if (!settings.apiKey || !settings.model) {
+      setWritingSubmitError('Vui lòng cấu hình API Key và model trong Cài đặt trước khi chấm bài.');
+      return;
+    }
+
+    setIsEvaluatingWriting(true);
+    setIsWritingLocked(true);
+    setWritingSubmitError('');
+
+    try {
+      const result = await evaluateExamWritingSubmission(
+        { tasks: examData.writing.tasks, answers: writingAnswers },
+        settings.apiKey,
+        settings.model
+      );
+      setWritingEvaluation(result);
+      localStorage.removeItem(EXAM_WRITING_DRAFT_KEY);
+      setPhase('results');
+    } catch (err) {
+      setWritingSubmitError(err.message || 'Không thể chấm bài Writing. Vui lòng thử lại.');
+      setIsWritingLocked(writingTimeLeft <= 0);
+    } finally {
+      setIsEvaluatingWriting(false);
+    }
   };
 
   // ═══════════════════════════════════════
@@ -397,7 +568,7 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
   if (phase === 'setup') {
     return (
       <div className="min-h-full flex items-center justify-center p-xl">
-        <div className="bg-surface border border-hairline rounded-[16px] p-[40px] shadow-sm max-w-lg w-full flex flex-col items-center text-center">
+        <div className="bg-surface border border-hairline rounded-[16px] p-[40px] shadow-sm max-w-2xl w-full flex flex-col items-center text-center">
           <div className="w-24 h-24 mb-md mx-auto rounded-full bg-surface-container-low flex items-center justify-center">
             <ClipboardCheck size={48} className="text-primary" />
           </div>
@@ -430,6 +601,49 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
                 >
                   {level}
                 </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="w-full text-left mb-xl bg-canvas-soft p-lg rounded-[12px] border border-hairline">
+            <div className="flex items-start justify-between gap-md">
+              <div className="min-w-0">
+                <label htmlFor="include-writing-test" className="block font-eyebrow text-eyebrow text-primary uppercase mb-xs tracking-wide">
+                  IELTS Writing test
+                </label>
+                <p className="font-body-sm text-body-sm text-ink-muted">
+                  Thêm phase Viết chuẩn Academic: Task 1 trong 20 phút và Task 2 trong 40 phút.
+                </p>
+              </div>
+              <button
+                id="include-writing-test"
+                type="button"
+                onClick={() => setIncludeWritingTest(value => !value)}
+                className={`relative inline-flex h-8 w-14 shrink-0 items-center rounded-full border transition-colors ${
+                  includeWritingTest
+                    ? 'bg-primary border-primary'
+                    : 'bg-surface-container-high border-hairline'
+                }`}
+                aria-pressed={includeWritingTest}
+                aria-label="Bật hoặc tắt IELTS Writing test"
+              >
+                <span
+                  className={`absolute left-1 top-1 h-6 w-6 rounded-full bg-surface shadow-sm transition-transform ${
+                    includeWritingTest ? 'translate-x-6' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+            <div className="mt-md grid grid-cols-1 sm:grid-cols-3 gap-sm">
+              {[
+                ['Nghe/Nói/Đọc', 'Flow hiện tại'],
+                ['Writing Task 1', '150 từ · 20 phút'],
+                ['Writing Task 2', '250 từ · 40 phút'],
+              ].map(([title, detail]) => (
+                <div key={title} className="rounded-[8px] border border-hairline bg-surface px-md py-sm">
+                  <p className="font-button text-button text-ink">{title}</p>
+                  <p className="font-body-sm text-body-sm text-ink-muted">{detail}</p>
+                </div>
               ))}
             </div>
           </div>
@@ -475,7 +689,7 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
               <Headphones size={16} /> Phần 1: Kiểm tra Nghe
             </div>
             <div className="flex-1 h-px bg-hairline" />
-            <span className="font-eyebrow text-eyebrow text-ink-muted">1/3</span>
+            <span className="font-eyebrow text-eyebrow text-ink-muted">{includeWritingTest ? '1/4' : '1/3'}</span>
           </div>
         </div>
 
@@ -641,7 +855,7 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
               <MessageSquare size={16} /> Phần 2: Kiểm tra Nói
             </div>
             <div className="flex-1 h-px bg-hairline" />
-            <span className="font-eyebrow text-eyebrow text-ink-muted">2/3</span>
+            <span className="font-eyebrow text-eyebrow text-ink-muted">{includeWritingTest ? '2/4' : '2/3'}</span>
           </div>
           <div className="h-3 w-full bg-hairline rounded-full overflow-hidden">
             <div className="h-full bg-accent-pink transition-all duration-500" style={{ width: `${speakingProgress}%` }} />
@@ -842,7 +1056,7 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
               <BookOpen size={16} /> Phần 3: Đọc - hiểu
             </div>
             <div className="flex-1 h-px bg-hairline" />
-            <span className="font-eyebrow text-eyebrow text-ink-muted">3/3</span>
+            <span className="font-eyebrow text-eyebrow text-ink-muted">{includeWritingTest ? '3/4' : '3/3'}</span>
           </div>
           <div className="flex justify-between font-eyebrow text-eyebrow text-ink-muted uppercase mb-xs">
             <span>Tiến độ</span>
@@ -977,10 +1191,167 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
     );
   }
 
+  // ── WRITING ──
+  if (phase === 'writing') {
+    const writingData = examData?.writing;
+    const task = writingData?.tasks?.[writingTaskIndex] || {};
+    const taskMeta = EXAM_WRITING_TASKS[writingTaskIndex] || EXAM_WRITING_TASKS[0];
+    const currentAnswer = writingAnswers[writingTaskIndex] || '';
+    const currentWordCount = countWords(currentAnswer);
+    const task1WordCount = countWords(writingAnswers[0]);
+    const task2WordCount = countWords(writingAnswers[1]);
+    const currentMinWords = taskMeta?.minWords || 0;
+    const isUnderWordTarget = currentWordCount < currentMinWords;
+    const task2HasStarted = writingTimeLeft <= EXAM_WRITING_TASK1_SECONDS;
+    const totalWritingProgress = ((EXAM_WRITING_TOTAL_SECONDS - writingTimeLeft) / EXAM_WRITING_TOTAL_SECONDS) * 100;
+
+    return (
+      <div className="min-h-full p-lg md:p-xl">
+        <div className="mx-auto flex w-full max-w-7xl flex-col gap-lg">
+          <div className="flex flex-col gap-md md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-sm">
+              <div className="px-md py-xs rounded-full bg-accent-purple/10 text-accent-purple font-button text-button flex items-center gap-xs">
+                <PenLine size={16} /> Phần 4: Kiểm tra Viết
+              </div>
+              <div className="h-px flex-1 bg-hairline md:w-32" />
+              <span className="font-eyebrow text-eyebrow text-ink-muted">4/4</span>
+            </div>
+            <div className={`flex items-center gap-sm rounded-full border px-md py-sm font-button text-button ${
+              writingTimeLeft <= 300
+                ? 'border-error/30 bg-error/10 text-error'
+                : 'border-hairline bg-surface text-ink'
+            }`}>
+              <Clock3 size={18} />
+              <span>{formatWritingTime(writingTimeLeft)}</span>
+            </div>
+          </div>
+
+          <div className="h-3 w-full overflow-hidden rounded-full bg-hairline">
+            <div
+              className="h-full bg-accent-purple transition-all duration-500"
+              style={{ width: `${Math.min(100, Math.max(0, totalWritingProgress))}%` }}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 gap-lg xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+            <aside className="flex min-w-0 flex-col gap-lg">
+              <div className="bg-surface border border-hairline rounded-[16px] p-lg shadow-sm">
+                <div className="mb-md grid grid-cols-2 gap-sm rounded-[10px] bg-canvas-soft p-xs border border-hairline">
+                  {EXAM_WRITING_TASKS.map((meta, index) => (
+                    <button
+                      key={meta.taskType}
+                      type="button"
+                      onClick={() => setWritingTaskIndex(index)}
+                      className={`rounded-[8px] px-md py-sm text-left transition-colors ${
+                        writingTaskIndex === index
+                          ? 'bg-surface text-primary shadow-sm'
+                          : 'text-ink-muted hover:text-ink hover:bg-surface/70'
+                      }`}
+                    >
+                      <span className="block font-button text-button">{meta.label}</span>
+                      <span className="block font-body-sm text-body-sm">{meta.minWords} từ · {meta.minutes} phút</span>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="mb-md flex flex-wrap items-center gap-sm">
+                  <span className={`rounded-full px-md py-xs font-body-sm text-body-sm ${
+                    writingTaskIndex === 0 && task2HasStarted
+                      ? 'bg-accent-orange/10 text-accent-orange'
+                      : 'bg-primary/10 text-primary'
+                  }`}>
+                    {writingTaskIndex === 0 && task2HasStarted
+                      ? 'Đã qua mốc 20 phút'
+                      : `${taskMeta.label} · mục tiêu ${taskMeta.minWords}+ từ`}
+                  </span>
+                  {isWritingLocked && (
+                    <span className="rounded-full bg-error/10 px-md py-xs font-body-sm text-body-sm text-error">
+                      Hết giờ
+                    </span>
+                  )}
+                </div>
+
+                <div className="rounded-[12px] border border-hairline bg-canvas-soft p-md">
+                  <div className="mb-sm flex items-center gap-xs font-eyebrow text-eyebrow uppercase tracking-wide text-ink-muted">
+                    <FileText size={15} /> Đề bài
+                  </div>
+                  <p className="whitespace-pre-line font-body-md text-body-md leading-relaxed text-ink">
+                    {task.prompt}
+                  </p>
+                </div>
+
+                {writingTaskIndex === 0 && task.visuals?.length > 0 && (
+                  <div className="mt-lg">
+                    <WritingVisual visuals={task.visuals} />
+                  </div>
+                )}
+              </div>
+            </aside>
+
+            <section className="flex min-w-0 flex-col rounded-[16px] border border-hairline bg-surface p-lg shadow-sm">
+              <div className="mb-md flex flex-col gap-sm sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="font-heading-2 text-heading-2 text-ink">{taskMeta.label}</h3>
+                  <p className="font-body-sm text-body-sm text-ink-muted">
+                    Task 1: {task1WordCount}/150 từ · Task 2: {task2WordCount}/250 từ
+                  </p>
+                </div>
+                <span className={`rounded-full px-md py-xs font-button text-button ${
+                  isUnderWordTarget
+                    ? 'bg-accent-orange/10 text-accent-orange'
+                    : 'bg-accent-green/10 text-accent-green'
+                }`}>
+                  {currentWordCount}/{currentMinWords}+ từ
+                </span>
+              </div>
+
+              <textarea
+                value={currentAnswer}
+                onChange={event => handleWritingAnswerChange(event.target.value)}
+                disabled={isWritingLocked || isEvaluatingWriting}
+                placeholder="Viết bài của bạn ở đây..."
+                className="min-h-[460px] flex-1 resize-none rounded-[12px] border border-hairline bg-canvas-soft p-lg font-body-md text-body-md leading-7 text-ink outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-70"
+              />
+
+              {writingSubmitError && (
+                <div className="mt-md flex items-start gap-sm rounded-[12px] border border-error/20 bg-error-container p-md text-on-error-container">
+                  <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+                  <p className="font-body-sm text-body-sm">{writingSubmitError}</p>
+                </div>
+              )}
+
+              <div className="mt-lg flex flex-col gap-sm sm:flex-row sm:items-center sm:justify-between">
+                <p className="font-body-sm text-body-sm text-ink-muted">
+                  Autosave mỗi 10 giây. Task 2 được tính nặng gấp đôi Task 1 khi chấm band Writing.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleSubmitWritingExam}
+                  disabled={isEvaluatingWriting}
+                  className="inline-flex items-center justify-center gap-xs rounded-full bg-primary px-xl py-md font-button text-button text-on-primary shadow-sm transition-all hover:bg-primary-active disabled:opacity-60"
+                >
+                  {isEvaluatingWriting ? (
+                    <>
+                      <Loader2 size={18} className="animate-spin" /> Đang chấm bài...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 size={18} /> Nộp bài
+                    </>
+                  )}
+                </button>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // ── RESULTS ──
   return (
     <div className="min-h-full flex items-center justify-center p-lg md:p-xl">
-      <div className="w-full max-w-4xl bg-surface border border-hairline rounded-[16px] p-lg md:p-xxl shadow-sm">
+      <div className="w-full max-w-6xl bg-surface border border-hairline rounded-[16px] p-lg md:p-xxl shadow-sm">
         <div className="text-center mb-xxl">
           <div className="w-24 h-24 bg-accent-green/10 rounded-full flex items-center justify-center mx-auto mb-lg shadow-inner border border-accent-green/20">
             <CheckCircle2 size={48} className="text-accent-green" />
@@ -991,7 +1362,7 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-lg mb-xxl">
+        <div className={`grid grid-cols-1 gap-lg mb-xxl ${writingEvaluation ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>
           {/* Listening score */}
           <div className="bg-accent-sky/5 border border-accent-sky/20 rounded-[16px] p-xl text-center">
             <Headphones size={32} className="text-accent-sky mx-auto mb-md" />
@@ -1021,11 +1392,85 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
               {readingAnswers.filter(a => a.isCorrect).length}/{readingAnswers.length} câu đúng
             </div>
           </div>
+
+          {writingEvaluation && (
+            <div className="bg-accent-purple/5 border border-accent-purple/20 rounded-[16px] p-xl text-center">
+              <PenLine size={32} className="text-accent-purple mx-auto mb-md" />
+              <div className="font-display-1 text-display-1 text-accent-purple mb-xs">
+                {writingEvaluation.overallWritingBand}
+              </div>
+              <div className="font-eyebrow text-eyebrow text-ink-muted uppercase">Kiểm tra Viết</div>
+              <div className="font-body-sm text-body-sm text-ink-muted mt-sm">
+                Task 1: {writingEvaluation.task1Band} · Task 2: {writingEvaluation.task2Band}
+              </div>
+            </div>
+          )}
         </div>
+
+        {writingEvaluation && (
+          <div className="mb-xxl rounded-[16px] border border-hairline bg-canvas-soft p-lg text-left">
+            <div className="mb-lg flex items-center gap-sm">
+              <PenLine size={22} className="text-accent-purple" />
+              <div>
+                <h3 className="font-heading-2 text-heading-2 text-ink">Phản hồi Writing</h3>
+                <p className="font-body-sm text-body-sm text-ink-muted">
+                  Band tổng Writing dùng tỉ lệ Task 1:Task 2 = 1:2.
+                </p>
+              </div>
+            </div>
+
+            {writingEvaluation.summary && (
+              <p className="mb-lg rounded-[12px] border border-hairline bg-surface p-md font-body-md text-body-md text-ink">
+                {writingEvaluation.summary}
+              </p>
+            )}
+
+            <div className="grid grid-cols-1 gap-lg lg:grid-cols-2">
+              {(writingEvaluation.taskReports || []).map(report => (
+                <div key={report.taskType} className="rounded-[12px] border border-hairline bg-surface p-md">
+                  <h4 className="mb-md font-title text-title text-ink">Task {report.taskType}</h4>
+                  <div className="space-y-sm">
+                    {(report.criteria || []).map(item => (
+                      <div key={item.name} className="rounded-[8px] bg-canvas-soft p-sm">
+                        <div className="mb-xs flex items-center justify-between gap-sm">
+                          <span className="font-button text-button text-ink">{item.name}</span>
+                          <span className="rounded-full bg-accent-purple/10 px-sm py-[2px] font-button text-button text-accent-purple">
+                            {item.band}
+                          </span>
+                        </div>
+                        <p className="font-body-sm text-body-sm text-ink-muted">{item.comment}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {writingEvaluation.upgradedRewrites?.length > 0 && (
+              <div className="mt-lg rounded-[12px] border border-hairline bg-surface p-md">
+                <h4 className="mb-md font-title text-title text-ink">Gợi ý nâng band</h4>
+                <div className="space-y-md">
+                  {writingEvaluation.upgradedRewrites.slice(0, 3).map((rewrite, index) => (
+                    <div key={`${rewrite.original}-${index}`} className="border-b border-hairline pb-md last:border-0 last:pb-0">
+                      <p className="font-body-sm text-body-sm text-ink-muted">{rewrite.original}</p>
+                      <p className="mt-xs font-body-md text-body-md text-ink">{rewrite.upgraded}</p>
+                      {rewrite.explanation && (
+                        <p className="mt-xs font-body-sm text-body-sm text-accent-purple">{rewrite.explanation}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="flex justify-center">
           <button
-            onClick={() => { setPhase('setup'); setSelectedTopicIds([]); }}
+            onClick={() => {
+              localStorage.removeItem(EXAM_WRITING_DRAFT_KEY);
+              setPhase('setup');
+            }}
             className="bg-primary text-on-primary rounded-full py-md px-xxl font-button text-button hover:bg-primary-active transition-all shadow-sm flex items-center gap-xs"
           >
             <RotateCcw size={18} /> Kiểm tra lại
