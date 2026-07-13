@@ -5,12 +5,12 @@ MinusLearn is an English vocabulary learning website organized by topic. It is d
 ## Current features
 
 - Topic-based vocabulary management with a dedicated sidebar for each topic.
-- Manual word creation with word, phonetic, meaning, example sentence, and image support.
+- Manual word creation with word, phonetic, meaning, example sentence, and image support (with local caching for external images).
 - AI-powered bulk import from a text block or word list.
-- Automatic illustration generation for vocabulary entries when an image model is configured.
+- Automatic illustration generation for vocabulary entries when an image model is configured, securely saved to the backend.
 - Search support and switching between card view and flashcard view.
 - Listening practice using Speech Synthesis, answer input, and mistake tracking for later review.
-- Reading practice with fill-in-the-blank multiple-choice questions.
+- Reading practice with fill-in-the-blank multiple-choice questions, featuring interactive AI explanations from Gemini.
 - Spaced repetition review with `Forgot`, `Hard`, `Good`, and `Easy` ratings.
 - Study streak tracking based on review history.
 - Topic syncing with the extension and URL-parameter support to open the AI modal with prefilled text.
@@ -29,7 +29,7 @@ MinusLearn is an English vocabulary learning website organized by topic. It is d
 
 ```text
 frontend/   Main web application
-backend/    FastAPI API, authentication, MongoDB persistence, backup and migration
+backend/    FastAPI API, authentication, MongoDB persistence, backup, image caching, and migration
 extension/  Chrome extension for sending clipped text to MinusLearn
 .agent/     Design notes and UI direction documents
 ```

@@ -21,7 +21,11 @@ export function ListeningPractice({ words, activeTopicId, topics, settings, setS
   const [ieltsAnswers, setIeltsAnswers] = useState({});
   const [difficulty, setDifficulty] = useState('Trung bình (Band 5.5 - 6.5)');
   const [ieltsExplanation, setIeltsExplanation] = useState({});
+  const [isFetchingExplanation, setIsFetchingExplanation] = useState({});
+  const [visibleHints, setVisibleHints] = useState({});
+  const [highlightedSentence, setHighlightedSentence] = useState('');
   const [audioState, setAudioState] = useState('idle'); // 'idle', 'playing', 'finished'
+  const [audioRate, setAudioRate] = useState(0.9); // NPC reading speed
 
   // Toast State: { message: string, type: 'success' | 'error' } | null
   const [toast, setToast] = useState(null);
@@ -55,6 +59,9 @@ export function ListeningPractice({ words, activeTopicId, topics, settings, setS
     setTestState('setup');
     setIeltsAnswers({});
     setIeltsExplanation({});
+    setIsFetchingExplanation({});
+    setVisibleHints({});
+    setHighlightedSentence('');
     setAudioState('idle');
     setTimeLeft(2 * 60);
 
@@ -139,7 +146,7 @@ export function ListeningPractice({ words, activeTopicId, topics, settings, setS
       if (voice) utterance.voice = voice;
     }
 
-    utterance.rate = 0.9;
+    utterance.rate = audioRate;
     utterance.onstart = () => setAudioState('playing');
     utterance.onend = () => setAudioState('finished');
     utterance.onerror = (e) => {
@@ -148,6 +155,39 @@ export function ListeningPractice({ words, activeTopicId, topics, settings, setS
     };
 
     window.speechSynthesis.speak(utterance);
+  };
+
+  const playAnswerSentence = (sentence) => {
+    if (!sentence) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(sentence);
+    if (settings?.speechVoiceURI) {
+      const voices = window.speechSynthesis.getVoices();
+      const voice = voices.find(v => v.voiceURI === settings.speechVoiceURI);
+      if (voice) utterance.voice = voice;
+    }
+    utterance.rate = audioRate;
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const renderTranscript = () => {
+    if (!ieltsTest?.transcript) return null;
+    if (!highlightedSentence) return ieltsTest.transcript;
+    
+    const idx = ieltsTest.transcript.indexOf(highlightedSentence);
+    if (idx === -1) return ieltsTest.transcript;
+
+    const before = ieltsTest.transcript.slice(0, idx);
+    const highlight = ieltsTest.transcript.slice(idx, idx + highlightedSentence.length);
+    const after = ieltsTest.transcript.slice(idx + highlightedSentence.length);
+
+    return (
+      <>
+        {before}
+        <span id="highlighted-sentence" className="bg-accent-orange/30 font-bold px-1 rounded">{highlight}</span>
+        {after}
+      </>
+    );
   };
 
   const handleStart = (reviewMode = false) => {
@@ -691,9 +731,26 @@ export function ListeningPractice({ words, activeTopicId, topics, settings, setS
                 <Volume2 size={48} className="text-accent-purple" />
               </div>
 
-              <p className="font-body-md text-body-md text-ink-muted mb-lg">
+              <p className="font-body-md text-body-md text-ink-muted mb-md">
                 Hãy chuẩn bị sẵn sàng. Audio chỉ được nghe 1 lần duy nhất!
               </p>
+
+              <div className="mb-lg flex flex-col items-center gap-xs w-full max-w-[200px] mx-auto">
+                <label className="font-body-sm text-ink-muted flex justify-between w-full">
+                  <span>Tốc độ đọc:</span>
+                  <span className="font-bold text-ink">{audioRate}x</span>
+                </label>
+                <input 
+                  type="range" 
+                  min="0.5" 
+                  max="1.5" 
+                  step="0.1" 
+                  value={audioRate} 
+                  onChange={(e) => setAudioRate(parseFloat(e.target.value))}
+                  disabled={audioState === 'playing'}
+                  className="w-full accent-accent-purple"
+                />
+              </div>
 
               {audioState === 'idle' ? (
                 <button
@@ -761,6 +818,31 @@ export function ListeningPractice({ words, activeTopicId, topics, settings, setS
                     ))
                   )}
                 </div>
+                {audioState === 'finished' && (
+                  <div className="mt-md flex flex-col gap-sm">
+                    <div className="flex gap-md">
+                      <button
+                        onClick={() => playAnswerSentence(q.answerSentence)}
+                        className="text-primary font-button text-button hover:underline flex items-center gap-xs"
+                      >
+                        <Volume2 size={16} />
+                        Phát lại đoạn chứa câu trả lời
+                      </button>
+                      <button
+                        onClick={() => setVisibleHints({ ...visibleHints, [idx]: !visibleHints[idx] })}
+                        className="text-accent-sky font-button text-button hover:underline flex items-center gap-xs"
+                      >
+                        <BookOpen size={16} />
+                        {visibleHints[idx] ? 'Ẩn gợi ý' : 'Gợi ý trả lời'}
+                      </button>
+                    </div>
+                    {visibleHints[idx] && (
+                      <div className="p-sm bg-accent-sky/10 border border-accent-sky/20 rounded-[8px] font-body-sm text-ink-muted">
+                        <strong className="text-accent-sky">Gợi ý:</strong> {q.hint || 'Không có gợi ý cho câu này.'}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -791,7 +873,7 @@ export function ListeningPractice({ words, activeTopicId, topics, settings, setS
 
             <div className="bg-canvas-soft border border-hairline rounded-[16px] p-lg max-h-[500px] overflow-y-auto">
               <h3 className="font-heading-3 text-heading-3 text-ink mb-sm flex items-center gap-xs"><FileText size={20} /> Transcript (Kịch bản)</h3>
-              <p className="font-body-sm text-body-sm text-ink leading-relaxed whitespace-pre-wrap">{ieltsTest.transcript}</p>
+              <p className="font-body-sm text-body-sm text-ink leading-relaxed whitespace-pre-wrap">{renderTranscript()}</p>
             </div>
 
             <button
@@ -836,6 +918,20 @@ export function ListeningPractice({ words, activeTopicId, topics, settings, setS
                       Tại sao lại chọn đáp án này?
                     </button>
                   )}
+                  <button
+                    onClick={() => {
+                      playAnswerSentence(q.answerSentence);
+                      setHighlightedSentence(q.answerSentence);
+                      setTimeout(() => {
+                        const el = document.getElementById('highlighted-sentence');
+                        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      }, 100);
+                    }}
+                    className="mt-sm text-accent-purple font-button text-button hover:underline flex items-center gap-xs block"
+                  >
+                    <Volume2 size={16} />
+                    Phát lại đoạn chứa câu trả lời
+                  </button>
                 </div>
               );
             })}

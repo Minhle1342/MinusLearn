@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { BookOpen, CheckCircle2, XCircle, Loader2, Clock, ChevronRight } from 'lucide-react';
 import { useRemoteStorage } from '../../hooks/useRemoteStorage';
-import { generateIELTSReadingTest, explainReadingAnswer } from '../../services/api';
+import { generateIELTSReadingTest, explainReadingAnswer, explainIeltsReadingAnswer } from '../../services/api';
 
 export function ReadingPractice({ words, activeTopicId, topics, settings, setSrData }) {
   const [testState, setTestState] = useState('setup'); // setup, playing, results
@@ -102,14 +102,14 @@ export function ReadingPractice({ words, activeTopicId, topics, settings, setSrD
   const handleExplainIelts = async (idx, questionObj) => {
     setIsFetchingExplanation(prev => ({ ...prev, [idx]: true }));
     try {
-      const result = await explainReadingAnswer(
+      const result = await explainIeltsReadingAnswer(
         ieltsTest.passage,
-        questionObj.question,
+        questionObj.text || questionObj.question,
         questionObj.correctAnswer,
         settings.apiKey,
         settings.model
       );
-      setIeltsExplanation(prev => ({ ...prev, [idx]: result.explanation }));
+      setIeltsExplanation(prev => ({ ...prev, [idx]: result }));
     } catch (err) {
       showToast(err.message || 'Lỗi khi lấy giải thích', 'error');
     } finally {
