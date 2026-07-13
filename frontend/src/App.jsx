@@ -18,7 +18,7 @@ import { WritingPractice } from './components/page/WritingPractice';
 import { ExamPage } from './components/page/ExamPage';
 
 function LearningApp() {
-  const [topics, setTopics] = useRemoteStorage('minuslearn_topics', [
+  const [topics, setTopics, topicsMeta] = useRemoteStorage('minuslearn_topics', [
     { id: 'default', name: 'General', colorClass: 'bg-accent-sky' }
   ]);
   const [words, setWords] = useRemoteStorage('minuslearn_words', []);
@@ -51,8 +51,12 @@ function LearningApp() {
   const [initialAiText, setInitialAiText] = useState('');
 
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const hasProcessedUrl = React.useRef(false);
 
   useEffect(() => {
+    if (topicsMeta.loading || hasProcessedUrl.current) return;
+    
+    hasProcessedUrl.current = true;
     const params = new URLSearchParams(window.location.search);
     const bulkParam = params.get('bulk');
     const newTopicParam = params.get('newTopic');
@@ -75,7 +79,7 @@ function LearningApp() {
       setIsWordModalOpen(true);
       window.history.replaceState({}, document.title, window.location.pathname);
     }
-  }, []);
+  }, [topicsMeta.loading, setTopics]);
 
   useEffect(() => {
     document.body.classList.remove('theme-white-blue', 'theme-tokyo');
