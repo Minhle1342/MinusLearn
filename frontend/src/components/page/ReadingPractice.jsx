@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { BookOpen, CheckCircle2, XCircle } from 'lucide-react';
+import { BookOpen, CheckCircle2, XCircle, Loader2, Clock, ChevronRight } from 'lucide-react';
 import { useRemoteStorage } from '../../hooks/useRemoteStorage';
+import { generateIELTSReadingTest, explainReadingAnswer } from '../../services/api';
 
-export function ReadingPractice({ words, activeTopicId, topics, setSrData }) {
+export function ReadingPractice({ words, activeTopicId, topics, settings, setSrData }) {
   const [testState, setTestState] = useState('setup'); // setup, playing, results
   const [testMode, setTestMode] = useState('multiple_choice');
   const [wordCount, setWordCount] = useState(10);
@@ -14,6 +15,15 @@ export function ReadingPractice({ words, activeTopicId, topics, setSrData }) {
   const [results, setResults] = useState([]);
   const [selectedOption, setSelectedOption] = useState(null);
 
+  // IELTS State
+  const [ieltsTest, setIeltsTest] = useState(null);
+  const [isLoadingIelts, setIsLoadingIelts] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(20 * 60);
+  const [ieltsAnswers, setIeltsAnswers] = useState({});
+  const [difficulty, setDifficulty] = useState('Trung bình');
+  const [ieltsExplanation, setIeltsExplanation] = useState({});
+  const [isFetchingExplanation, setIsFetchingExplanation] = useState({});
+
   const [mistakes, setMistakes] = useRemoteStorage('minuslearn_reading_mistakes', {});
 
   const topicWords = words.filter(w => w.topicId === activeTopicId);
@@ -23,11 +33,88 @@ export function ReadingPractice({ words, activeTopicId, topics, setSrData }) {
     setWordCount(topicWords.length);
     setTestState('setup');
     setResults([]);
+    setIeltsTest(null);
   }, [activeTopicId, topicWords.length]);
+
+  useEffect(() => {
+    let timer;
+    if (testState === 'playing_ielts' && ieltsTest) {
+      timer = setInterval(() => {
+        setTimeLeft(prev => {
+          if (prev <= 1) {
+            clearInterval(timer);
+            setTestState('results_ielts');
+            showToast('Hết giờ! Bài thi đã tự động nộp.', 'error');
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [testState, ieltsTest]);
 
   const showToast = (message, type) => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 2500);
+  };
+
+  const handleStartIelts = async () => {
+    if (topicWords.length === 0) return;
+    setIsLoadingIelts(true);
+    setTestState('loading_ielts');
+    
+    try {
+      const shuffled = [...topicWords].sort(() => 0.5 - Math.random());
+      const selected = shuffled.slice(0, 20);
+      
+      const test = await generateIELTSReadingTest(selected, difficulty, settings.apiKey, settings.model);
+      setIeltsTest(test);
+      setTimeLeft(20 * 60);
+      setIeltsAnswers({});
+      setTestState('playing_ielts');
+    } catch (err) {
+      showToast(err.message || 'Lỗi khi tạo đề IELTS', 'error');
+      setTestState('setup');
+    } finally {
+      setIsLoadingIelts(false);
+    }
+  };
+
+  const calculateBandScore = (correct, total) => {
+    const scaledScore = (correct / total) * 40;
+    if (scaledScore >= 39) return 9.0;
+    if (scaledScore >= 37) return 8.5;
+    if (scaledScore >= 35) return 8.0;
+    if (scaledScore >= 33) return 7.5;
+    if (scaledScore >= 30) return 7.0;
+    if (scaledScore >= 27) return 6.5;
+    if (scaledScore >= 23) return 6.0;
+    if (scaledScore >= 19) return 5.5;
+    if (scaledScore >= 15) return 5.0;
+    if (scaledScore >= 13) return 4.5;
+    if (scaledScore >= 10) return 4.0;
+    return 'Dưới 4.0';
+  };
+
+  const handleExplainIelts = async (idx, questionObj) => {
+    setIsFetchingExplanation(prev => ({ ...prev, [idx]: true }));
+    try {
+      const result = await explainReadingAnswer(
+        ieltsTest.passage,
+        questionObj.question,
+        questionObj.correctAnswer,
+        settings.apiKey,
+        settings.model
+      );
+      setIeltsExplanation(prev => ({ ...prev, [idx]: result.explanation }));
+    } catch (err) {
+      showToast(err.message || 'Lỗi khi lấy giải thích', 'error');
+    } finally {
+      setIsFetchingExplanation(prev => ({ ...prev, [idx]: false }));
+    }
   };
 
   const handleStart = (reviewMode = false) => {
@@ -241,37 +328,71 @@ export function ReadingPractice({ words, activeTopicId, topics, setSrData }) {
               >
                 Nhập từ vựng
               </button>
+              <button 
+                onClick={() => setTestMode('ielts_academic')}
+                className={`flex-1 py-sm rounded-[8px] font-title text-title transition-all border ${testMode === 'ielts_academic' ? 'bg-primary text-surface border-primary shadow-sm' : 'bg-surface text-ink hover:bg-surface-container-low border-hairline'}`}
+              >
+                IELTS Academic
+              </button>
             </div>
           </div>
 
-          <div className="w-full text-left mb-xxl bg-canvas-soft p-lg rounded-[12px] border border-hairline">
-            <label className="block font-eyebrow text-eyebrow text-primary uppercase mb-sm tracking-wide">
-              Số lượng từ muốn kiểm tra
-            </label>
-            <input
-              type="number"
-              min="1"
-              max={topicWords.length}
-              value={wordCount}
-              onChange={(e) => setWordCount(parseInt(e.target.value) || 1)}
-              className="w-full bg-surface border border-hairline rounded-[8px] p-sm font-title text-title text-ink focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-shadow"
-            />
-          </div>
+          {testMode === 'ielts_academic' ? (
+            <div className="w-full text-left mb-xxl bg-canvas-soft p-lg rounded-[12px] border border-hairline">
+              <label className="block font-eyebrow text-eyebrow text-primary uppercase mb-sm tracking-wide">
+                Độ khó (Mini Test 20 phút)
+              </label>
+              <select
+                value={difficulty}
+                onChange={(e) => setDifficulty(e.target.value)}
+                className="w-full bg-surface border border-hairline rounded-[8px] p-sm font-title text-title text-ink focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-shadow"
+              >
+                <option value="Dễ">Dễ (Band 4.0 - 5.0)</option>
+                <option value="Trung bình">Trung bình (Band 5.5 - 6.5)</option>
+                <option value="Khó">Khó (Band 7.0+)</option>
+              </select>
+            </div>
+          ) : (
+            <div className="w-full text-left mb-xxl bg-canvas-soft p-lg rounded-[12px] border border-hairline">
+              <label className="block font-eyebrow text-eyebrow text-primary uppercase mb-sm tracking-wide">
+                Số lượng từ muốn kiểm tra
+              </label>
+              <input
+                type="number"
+                min="1"
+                max={topicWords.length}
+                value={wordCount}
+                onChange={(e) => setWordCount(parseInt(e.target.value) || 1)}
+                className="w-full bg-surface border border-hairline rounded-[8px] p-sm font-title text-title text-ink focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-shadow"
+              />
+            </div>
+          )}
 
           <div className="flex gap-sm w-full">
-            <button
-              onClick={() => handleStart(false)}
-              className="flex-1 bg-primary text-on-primary font-button text-button py-md rounded-full shadow-md hover:bg-primary-active hover:shadow-lg hover:-translate-y-0.5 transition-all active:translate-y-0 active:shadow-sm"
-            >
-              Bắt đầu kiểm tra
-            </button>
-            {wrongWordsInTopic.length > 0 && (
+            {testMode === 'ielts_academic' ? (
               <button
-                onClick={() => handleStart(true)}
-                className="flex-1 bg-error text-surface font-button text-button py-md rounded-full shadow-md hover:bg-error/90 hover:shadow-lg hover:-translate-y-0.5 transition-all active:translate-y-0 active:shadow-sm"
+                onClick={handleStartIelts}
+                className="flex-1 bg-primary text-on-primary font-button text-button py-md rounded-full shadow-md hover:bg-primary-active hover:shadow-lg hover:-translate-y-0.5 transition-all active:translate-y-0 active:shadow-sm"
               >
-                Ôn {wrongWordsInTopic.length} câu sai
+                Tạo đề & Bắt đầu
               </button>
+            ) : (
+              <>
+                <button
+                  onClick={() => handleStart(false)}
+                  className="flex-1 bg-primary text-on-primary font-button text-button py-md rounded-full shadow-md hover:bg-primary-active hover:shadow-lg hover:-translate-y-0.5 transition-all active:translate-y-0 active:shadow-sm"
+                >
+                  Bắt đầu kiểm tra
+                </button>
+                {wrongWordsInTopic.length > 0 && (
+                  <button
+                    onClick={() => handleStart(true)}
+                    className="flex-1 bg-error text-surface font-button text-button py-md rounded-full shadow-md hover:bg-error/90 hover:shadow-lg hover:-translate-y-0.5 transition-all active:translate-y-0 active:shadow-sm"
+                  >
+                    Ôn {wrongWordsInTopic.length} câu sai
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -464,6 +585,148 @@ export function ReadingPractice({ words, activeTopicId, topics, setSrData }) {
                 Ôn {wrongWordsInTopic.length} câu sai
               </button>
             )}
+          </div>
+        </div>
+      )}
+
+      {testState === 'loading_ielts' && (
+        <div className="w-full h-64 flex flex-col items-center justify-center">
+          <Loader2 className="animate-spin text-primary mb-md" size={48} />
+          <p className="font-title text-title text-ink-muted">Đang tạo đề thi IELTS... Vui lòng đợi.</p>
+        </div>
+      )}
+
+      {testState === 'playing_ielts' && ieltsTest && (
+        <div className="w-full flex flex-col lg:flex-row gap-lg items-start h-[calc(100vh-150px)]">
+          {/* Passage Section */}
+          <div className="w-full lg:w-1/2 bg-surface border border-hairline rounded-[16px] p-lg shadow-sm h-full overflow-y-auto custom-scrollbar">
+            <h2 className="font-display-2 text-display-2 text-ink mb-md">{ieltsTest.title}</h2>
+            <div className="font-body-md text-body-md text-ink leading-relaxed whitespace-pre-wrap">
+              {ieltsTest.passage}
+            </div>
+          </div>
+
+          {/* Questions Section */}
+          <div className="w-full lg:w-1/2 bg-surface border border-hairline rounded-[16px] p-lg shadow-sm h-full overflow-y-auto custom-scrollbar flex flex-col">
+            <div className="flex justify-between items-center mb-lg pb-md border-b border-hairline sticky top-0 bg-surface z-10 pt-sm">
+              <h3 className="font-title text-title text-ink">Câu hỏi</h3>
+              <div className="flex items-center gap-xs font-title text-title text-primary bg-primary/10 px-md py-xs rounded-full">
+                <Clock size={18} />
+                <span>{Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}</span>
+              </div>
+            </div>
+
+            <div className="flex-1 space-y-xl">
+              {ieltsTest.questions.map((q, idx) => (
+                <div key={idx} className="bg-canvas-soft p-md rounded-[12px] border border-hairline">
+                  <p className="font-title text-title text-ink mb-md">{idx + 1}. {q.text}</p>
+                  <div className="space-y-sm">
+                    {q.type === 'gap_fill' || !q.options || q.options.length === 0 ? (
+                      <input
+                        type="text"
+                        placeholder="Nhập câu trả lời..."
+                        value={ieltsAnswers[idx] || ''}
+                        onChange={(e) => setIeltsAnswers({ ...ieltsAnswers, [idx]: e.target.value })}
+                        className="w-full bg-surface border border-hairline rounded-[8px] p-sm font-title text-title text-ink focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-shadow"
+                      />
+                    ) : (
+                      q.options.map((opt, optIdx) => (
+                        <button
+                          key={optIdx}
+                          onClick={() => setIeltsAnswers({ ...ieltsAnswers, [idx]: opt })}
+                          className={`w-full text-left p-sm rounded-[8px] border transition-all ${ieltsAnswers[idx] === opt ? 'bg-primary/10 border-primary text-primary font-bold' : 'bg-surface border-hairline text-ink hover:bg-surface-container-low'}`}
+                        >
+                          {opt}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-xl pt-md border-t border-hairline flex justify-end sticky bottom-0 bg-surface pb-sm">
+              <button
+                onClick={() => setTestState('results_ielts')}
+                className="bg-primary text-on-primary font-button text-button py-sm px-xl rounded-full shadow-md hover:bg-primary-active transition-all"
+              >
+                Nộp bài
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {testState === 'results_ielts' && ieltsTest && (
+        <div className="bg-surface border border-hairline rounded-[16px] p-[40px] shadow-sm max-w-4xl w-full mx-auto">
+          <div className="text-center mb-xl">
+            <div className="w-24 h-24 bg-accent-green/10 rounded-full flex items-center justify-center mx-auto mb-lg shadow-inner border border-accent-green/20">
+              <CheckCircle2 size={48} className="text-accent-green" />
+            </div>
+            <h2 className="font-display-2 text-display-2 text-ink mb-sm">Kết quả IELTS Reading (Mini)</h2>
+            <div className="flex justify-center gap-xl mt-lg">
+              <div className="text-center">
+                <div className="font-display-1 text-display-1 text-accent-green">
+                  {ieltsTest.questions.filter((q, i) => ieltsAnswers[i]?.toString().trim().toLowerCase() === q.correctAnswer?.toString().trim().toLowerCase()).length} / {ieltsTest.questions.length}
+                </div>
+                <div className="font-eyebrow text-eyebrow text-ink-muted uppercase">Số câu đúng</div>
+              </div>
+              <div className="w-px bg-hairline"></div>
+              <div className="text-center">
+                <div className="font-display-1 text-display-1 text-primary">
+                  {calculateBandScore(ieltsTest.questions.filter((q, i) => ieltsAnswers[i]?.toString().trim().toLowerCase() === q.correctAnswer?.toString().trim().toLowerCase()).length, ieltsTest.questions.length)}
+                </div>
+                <div className="font-eyebrow text-eyebrow text-ink-muted uppercase">Band điểm dự kiến</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-lg mb-xl">
+            {ieltsTest.questions.map((q, idx) => {
+              const isCorrect = ieltsAnswers[idx]?.toString().trim().toLowerCase() === q.correctAnswer?.toString().trim().toLowerCase();
+              return (
+                <div key={idx} className={`p-lg rounded-[12px] border ${isCorrect ? 'bg-accent-green/5 border-accent-green/20' : 'bg-accent-orange/5 border-accent-orange/20'}`}>
+                  <p className="font-title text-title text-ink mb-sm">{idx + 1}. {q.text}</p>
+                  <p className="font-body-md text-body-md text-ink-muted mb-md">
+                    Đáp án của bạn: <span className={isCorrect ? 'text-accent-green font-bold' : 'text-accent-orange font-bold line-through decoration-2'}>{ieltsAnswers[idx] || '(Chưa làm)'}</span>
+                  </p>
+                  {!isCorrect && (
+                    <p className="font-body-md text-body-md text-accent-green mb-md font-bold">
+                      Đáp án đúng: {q.correctAnswer}
+                    </p>
+                  )}
+                  
+                  {isFetchingExplanation[idx] ? (
+                    <div className="flex items-center gap-xs text-primary font-body-sm mt-sm">
+                      <Loader2 size={16} className="animate-spin" />
+                      <span>Đang giải thích...</span>
+                    </div>
+                  ) : ieltsExplanation[idx] ? (
+                    <div className="mt-md p-md bg-surface rounded-[8px] border border-hairline font-body-sm text-ink leading-relaxed">
+                      <strong className="text-primary block mb-xs">Giải thích:</strong>
+                      {ieltsExplanation[idx]}
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => handleExplainIelts(idx, q)}
+                      className="mt-sm text-primary font-button text-button hover:underline flex items-center gap-xs"
+                    >
+                      <BookOpen size={16} />
+                      Tại sao lại chọn đáp án này?
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          
+          <div className="flex justify-center">
+            <button
+              onClick={() => setTestState('setup')}
+              className="bg-primary text-on-primary font-button text-button py-md px-xxl rounded-full shadow-md hover:bg-primary-active transition-all"
+            >
+              Làm lại
+            </button>
           </div>
         </div>
       )}

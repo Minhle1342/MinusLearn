@@ -8,6 +8,7 @@ import {
   evaluateExamWritingSubmission,
   generateExamContent,
   generateExamWritingContent,
+  explainReadingAnswer,
 } from '../../services/api';
 import { speakEnglishText, getEnglishVoices, getSelectedEnglishVoice } from '../../utils/speech';
 import {
@@ -95,6 +96,9 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
   const [readingInputSubmitted, setReadingInputSubmitted] = useState(false);
   const [readingInputIsCorrect, setReadingInputIsCorrect] = useState(false);
   const [showReadingHint, setShowReadingHint] = useState(false);
+  const [readingExplanation, setReadingExplanation] = useState(null);
+  const [isFetchingExplanation, setIsFetchingExplanation] = useState(false);
+  const [showNextButton, setShowNextButton] = useState(false);
 
   // ── Writing state ──
   const [writingTaskIndex, setWritingTaskIndex] = useState(0);
@@ -298,6 +302,9 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
       setReadingAnswers([]);
       setReadingSelectedOption(null);
       setShowReadingHint(false);
+      setReadingExplanation(null);
+      setIsFetchingExplanation(false);
+      setShowNextButton(false);
       setWritingTaskIndex(0);
       setWritingAnswers(['', '']);
       setWritingEvaluation(null);
@@ -341,6 +348,9 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
     setReadingInputSubmitted(false);
     setReadingInputIsCorrect(false);
     setShowReadingHint(false);
+    setReadingExplanation(null);
+    setIsFetchingExplanation(false);
+    setShowNextButton(false);
     
     setWritingTaskIndex(0);
     setWritingAnswers(['', '']);
@@ -544,7 +554,22 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
   // ═══════════════════════════════════════
   //  READING PHASE
   // ═══════════════════════════════════════
-  const handleSelectReadingAnswer = (optionIndex) => {
+  const handleNextReadingQuestion = () => {
+    setReadingSelectedOption(null);
+    setReadingInputValue('');
+    setReadingInputSubmitted(false);
+    setReadingInputIsCorrect(false);
+    setShowReadingHint(false);
+    setReadingExplanation(null);
+    setShowNextButton(false);
+    if (currentReadingQ + 1 < examData.reading.length) {
+      setCurrentReadingQ(currentReadingQ + 1);
+    } else {
+      finishReadingSection();
+    }
+  };
+
+  const handleSelectReadingAnswer = async (optionIndex) => {
     if (readingSelectedOption !== null) return;
     setReadingSelectedOption(optionIndex);
     const q = examData.reading[currentReadingQ];
@@ -552,21 +577,25 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
     const newAnswers = [...readingAnswers, { word: q.word, meaning: q.meaning, isCorrect, selected: optionIndex }];
     setReadingAnswers(newAnswers);
 
-    setTimeout(() => {
-      setReadingSelectedOption(null);
-      setReadingInputValue('');
-      setReadingInputSubmitted(false);
-      setReadingInputIsCorrect(false);
-      setShowReadingHint(false);
-      if (currentReadingQ + 1 < examData.reading.length) {
-        setCurrentReadingQ(currentReadingQ + 1);
-      } else {
-        finishReadingSection();
-      }
-    }, 1500);
+    setIsFetchingExplanation(true);
+    try {
+      const sentence = (q.newExample || '').replace(new RegExp(`\\b${q.word}\\b`, 'gi'), '____');
+      const selectedText = q.options[optionIndex];
+      const explanation = await explainReadingAnswer(
+        { sentence, word: q.word, isCorrect, selectedOption: selectedText },
+        settings.apiKey,
+        settings.model
+      );
+      setReadingExplanation(explanation);
+    } catch (err) {
+      setReadingExplanation('Không thể lấy giải thích từ Gemini. Lỗi kết nối hoặc API Key.');
+    } finally {
+      setIsFetchingExplanation(false);
+      setShowNextButton(true);
+    }
   };
 
-  const handleReadingSubmitInput = () => {
+  const handleReadingSubmitInput = async () => {
     if (!readingInputValue.trim() || readingInputSubmitted) return;
     
     setReadingInputSubmitted(true);
@@ -577,18 +606,21 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
     const newAnswers = [...readingAnswers, { word: q.word, meaning: q.meaning, isCorrect, selected: null, typed: readingInputValue }];
     setReadingAnswers(newAnswers);
     
-    setTimeout(() => {
-      setReadingSelectedOption(null);
-      setReadingInputValue('');
-      setReadingInputSubmitted(false);
-      setReadingInputIsCorrect(false);
-      setShowReadingHint(false);
-      if (currentReadingQ + 1 < examData.reading.length) {
-        setCurrentReadingQ(currentReadingQ + 1);
-      } else {
-        finishReadingSection();
-      }
-    }, 1500);
+    setIsFetchingExplanation(true);
+    try {
+      const sentence = (q.newExample || '').replace(new RegExp(`\\b${q.word}\\b`, 'gi'), '____');
+      const explanation = await explainReadingAnswer(
+        { sentence, word: q.word, isCorrect, selectedOption: readingInputValue },
+        settings.apiKey,
+        settings.model
+      );
+      setReadingExplanation(explanation);
+    } catch (err) {
+      setReadingExplanation('Không thể lấy giải thích từ Gemini. Lỗi kết nối hoặc API Key.');
+    } finally {
+      setIsFetchingExplanation(false);
+      setShowNextButton(true);
+    }
   };
 
   // ═══════════════════════════════════════
@@ -1396,6 +1428,32 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
                   </button>
                 );
               })}
+            </div>
+          )}
+
+          {/* Explanation and Next Button */}
+          {(readingSelectedOption !== null || readingInputSubmitted) && (
+            <div className="w-full mt-lg border-t border-hairline pt-lg flex flex-col items-center">
+              {isFetchingExplanation ? (
+                <div className="flex items-center gap-sm text-ink-muted mb-md">
+                  <Loader2 size={18} className="animate-spin" />
+                  <span className="font-body-sm text-body-sm">Gemini đang giải thích...</span>
+                </div>
+              ) : readingExplanation ? (
+                <div className="w-full bg-accent-sky/10 border border-accent-sky/20 rounded-[12px] p-md mb-md text-ink font-body-md text-body-md text-left">
+                  <strong className="text-accent-sky font-bold block mb-xs">Giải thích từ Gemini:</strong>
+                  {readingExplanation}
+                </div>
+              ) : null}
+              
+              {showNextButton && (
+                <button
+                  onClick={handleNextReadingQuestion}
+                  className="px-xl py-sm bg-primary text-on-primary font-button text-button rounded-full hover:bg-primary-active transition-colors shadow-sm flex items-center gap-xs"
+                >
+                  Câu tiếp theo <ChevronRight size={18} />
+                </button>
+              )}
             </div>
           )}
         </div>

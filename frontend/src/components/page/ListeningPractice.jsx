@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Volume2, Play, RotateCcw, Check, X, CheckCircle2, XCircle } from 'lucide-react';
+import { Volume2, Play, RotateCcw, Check, X, CheckCircle2, XCircle, Loader2, BookOpen, Clock, FileText } from 'lucide-react';
 import { useRemoteStorage } from '../../hooks/useRemoteStorage';
 import { speakEnglishText } from '../../utils/speech';
+import { generateIELTSListeningTest } from '../../services/api';
 
 export function ListeningPractice({ words, activeTopicId, topics, settings, setSrData }) {
   const [testState, setTestState] = useState('setup'); // 'setup', 'playing', 'results'
@@ -12,6 +13,15 @@ export function ListeningPractice({ words, activeTopicId, topics, settings, setS
   const [userInput, setUserInput] = useState('');
   const [results, setResults] = useState([]);
   const [selectedOption, setSelectedOption] = useState(null);
+
+  // IELTS State
+  const [ieltsTest, setIeltsTest] = useState(null);
+  const [isLoadingIelts, setIsLoadingIelts] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(2 * 60); // 2 minutes countdown
+  const [ieltsAnswers, setIeltsAnswers] = useState({});
+  const [difficulty, setDifficulty] = useState('Trung bình (Band 5.5 - 6.5)');
+  const [ieltsExplanation, setIeltsExplanation] = useState({});
+  const [audioState, setAudioState] = useState('idle'); // 'idle', 'playing', 'finished'
 
   // Toast State: { message: string, type: 'success' | 'error' } | null
   const [toast, setToast] = useState(null);
@@ -39,8 +49,105 @@ export function ListeningPractice({ words, activeTopicId, topics, settings, setS
     }, 2500);
   };
 
+  const handleStartIelts = async () => {
+    if (topicWords.length === 0) return;
+    setIsLoadingIelts(true);
+    setTestState('setup');
+    setIeltsAnswers({});
+    setIeltsExplanation({});
+    setAudioState('idle');
+    setTimeLeft(2 * 60);
+
+    try {
+      const apiKey = settings?.apiKey;
+      const model = settings?.model || 'gemini-1.5-flash';
+      if (!apiKey) throw new Error('Vui lòng thiết lập API Key trong Cài đặt');
+
+      const test = await generateIELTSListeningTest(topicWords, difficulty, apiKey, model);
+      if (!test || !test.questions) throw new Error('Dữ liệu bài thi không hợp lệ');
+
+      setIeltsTest(test);
+      setTestState('playing_ielts');
+    } catch (err) {
+      showToast(err.message || 'Lỗi khi tạo đề IELTS', 'error');
+      setTestState('setup');
+    } finally {
+      setIsLoadingIelts(false);
+    }
+  };
+
   const speak = (text) => {
     speakEnglishText(text, settings?.speechVoiceURI, { rate: 0.9 });
+  };
+
+  const calculateBandScore = (correct, total) => {
+    const percentage = correct / total;
+    if (percentage >= 0.97) return '9.0';
+    if (percentage >= 0.92) return '8.5';
+    if (percentage >= 0.87) return '8.0';
+    if (percentage >= 0.80) return '7.5';
+    if (percentage >= 0.75) return '7.0';
+    if (percentage >= 0.65) return '6.5';
+    if (percentage >= 0.57) return '6.0';
+    if (percentage >= 0.45) return '5.5';
+    if (percentage >= 0.40) return '5.0';
+    if (percentage >= 0.32) return '4.5';
+    if (percentage >= 0.27) return '4.0';
+    return '3.5';
+  };
+
+  const submitIeltsTest = () => {
+    setTestState('results_ielts');
+    window.speechSynthesis.cancel();
+  };
+
+  const handleExplainIelts = (idx, q) => {
+    setIsFetchingExplanation(prev => ({ ...prev, [idx]: true }));
+    setTimeout(() => {
+      setIeltsExplanation(prev => ({ ...prev, [idx]: q.explanation }));
+      setIsFetchingExplanation(prev => ({ ...prev, [idx]: false }));
+    }, 500); // Simulate loading for better UX
+  };
+
+  // Timer Effect
+  useEffect(() => {
+    let timer;
+    if (testState === 'playing_ielts' && audioState === 'finished' && timeLeft > 0) {
+      timer = setInterval(() => setTimeLeft(prev => prev - 1), 1000);
+    } else if (timeLeft === 0 && testState === 'playing_ielts') {
+      submitIeltsTest();
+    }
+    return () => clearInterval(timer);
+  }, [testState, audioState, timeLeft]);
+
+  // Clean up TTS when unmounting
+  useEffect(() => {
+    return () => {
+      window.speechSynthesis.cancel();
+    };
+  }, []);
+
+  const playIeltsAudio = () => {
+    if (audioState === 'playing' || audioState === 'finished') return;
+
+    // Create new utterance
+    const utterance = new SpeechSynthesisUtterance(ieltsTest.transcript);
+
+    if (settings?.speechVoiceURI) {
+      const voices = window.speechSynthesis.getVoices();
+      const voice = voices.find(v => v.voiceURI === settings.speechVoiceURI);
+      if (voice) utterance.voice = voice;
+    }
+
+    utterance.rate = 0.9;
+    utterance.onstart = () => setAudioState('playing');
+    utterance.onend = () => setAudioState('finished');
+    utterance.onerror = (e) => {
+      console.error('TTS error:', e);
+      setAudioState('finished');
+    };
+
+    window.speechSynthesis.speak(utterance);
   };
 
   const handleStart = (reviewMode = false) => {
@@ -143,7 +250,7 @@ export function ListeningPractice({ words, activeTopicId, topics, settings, setS
 
   const handleSelectOption = (selectedOpt) => {
     if (selectedOption) return;
-    
+
     setSelectedOption(selectedOpt);
 
     const currentWord = shuffledWords[currentIndex].word;
@@ -250,43 +357,74 @@ export function ListeningPractice({ words, activeTopicId, topics, settings, setS
               Chế độ kiểm tra
             </label>
             <div className="flex gap-sm">
-              <button 
+              <button
                 onClick={() => setTestMode('multiple_choice')}
                 className={`flex-1 py-sm rounded-[8px] font-title text-title transition-all border ${testMode === 'multiple_choice' ? 'bg-primary text-surface border-primary shadow-sm' : 'bg-surface text-ink hover:bg-surface-container-low border-hairline'}`}
               >
                 Trắc nghiệm
               </button>
-              <button 
+              <button
                 onClick={() => setTestMode('typing')}
                 className={`flex-1 py-sm rounded-[8px] font-title text-title transition-all border ${testMode === 'typing' ? 'bg-primary text-surface border-primary shadow-sm' : 'bg-surface text-ink hover:bg-surface-container-low border-hairline'}`}
               >
                 Nhập từ vựng
               </button>
+              <button
+                onClick={() => setTestMode('ielts_academic')}
+                className={`flex-1 py-sm rounded-[8px] font-title text-title transition-all border flex items-center justify-center gap-xs ${testMode === 'ielts_academic' ? 'bg-accent-purple text-surface border-accent-purple shadow-sm' : 'bg-surface text-ink hover:bg-surface-container-low border-hairline'}`}
+              >
+                IELTS Academic
+              </button>
             </div>
           </div>
 
-          <div className="w-full text-left mb-xxl bg-canvas-soft p-lg rounded-[12px] border border-hairline">
-            <label className="block font-eyebrow text-eyebrow text-primary uppercase mb-sm tracking-wide">
-              Số lượng từ muốn kiểm tra
-            </label>
-            <input
-              type="number"
-              min="1"
-              max={topicWords.length}
-              value={wordCount}
-              onChange={(e) => setWordCount(parseInt(e.target.value) || 1)}
-              className="w-full bg-surface border border-hairline rounded-[8px] p-sm font-title text-title text-ink focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-shadow"
-            />
-          </div>
+          {testMode === 'ielts_academic' ? (
+            <div className="w-full text-left mb-xxl bg-canvas-soft p-lg rounded-[12px] border border-hairline">
+              <label className="block font-eyebrow text-eyebrow text-primary uppercase mb-sm tracking-wide">
+                Độ khó (Sinh bởi AI)
+              </label>
+              <select
+                value={difficulty}
+                onChange={(e) => setDifficulty(e.target.value)}
+                className="w-full bg-surface border border-hairline rounded-[8px] p-sm font-title text-title text-ink focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-shadow"
+              >
+                <option value="Dễ (Band 4.0 - 5.0)">Dễ (Band 4.0 - 5.0)</option>
+                <option value="Trung bình (Band 5.5 - 6.5)">Trung bình (Band 5.5 - 6.5)</option>
+                <option value="Khó (Band 7.0 - 8.0)">Khó (Band 7.0 - 8.0)</option>
+              </select>
+            </div>
+          ) : (
+            <div className="w-full text-left mb-xxl bg-canvas-soft p-lg rounded-[12px] border border-hairline">
+              <label className="block font-eyebrow text-eyebrow text-primary uppercase mb-sm tracking-wide">
+                Số lượng từ muốn kiểm tra
+              </label>
+              <input
+                type="number"
+                min="1"
+                max={topicWords.length}
+                value={wordCount}
+                onChange={(e) => setWordCount(parseInt(e.target.value) || 1)}
+                className="w-full bg-surface border border-hairline rounded-[8px] p-sm font-title text-title text-ink focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-shadow"
+              />
+            </div>
+          )}
 
           <div className="flex gap-sm w-full">
             <button
-              onClick={() => handleStart(false)}
-              className="flex-1 bg-primary text-on-primary font-button text-button py-md rounded-full shadow-md hover:bg-primary-active hover:shadow-lg hover:-translate-y-0.5 transition-all active:translate-y-0 active:shadow-sm"
+              onClick={() => {
+                if (testMode === 'ielts_academic') {
+                  handleStartIelts();
+                } else {
+                  handleStart(false);
+                }
+              }}
+              disabled={isLoadingIelts}
+              className="flex-1 bg-primary text-on-primary font-button text-button py-md rounded-full shadow-md hover:bg-primary-active hover:shadow-lg hover:-translate-y-0.5 transition-all active:translate-y-0 active:shadow-sm flex items-center justify-center gap-xs disabled:opacity-70"
             >
-              Bắt đầu kiểm tra
+              {isLoadingIelts ? <Loader2 size={20} className="animate-spin" /> : null}
+              {isLoadingIelts ? 'Đang tạo đề...' : testMode === 'ielts_academic' ? 'Bắt đầu bài thi (AI)' : 'Bắt đầu kiểm tra'}
             </button>
-            {wrongWordsInTopic.length > 0 && (
+            {wrongWordsInTopic.length > 0 && testMode !== 'ielts_academic' && (
               <button
                 onClick={() => handleStart(true)}
                 className="flex-1 bg-error text-surface font-button text-button py-md rounded-full shadow-md hover:bg-error/90 hover:shadow-lg hover:-translate-y-0.5 transition-all active:translate-y-0 active:shadow-sm"
@@ -399,17 +537,17 @@ export function ListeningPractice({ words, activeTopicId, topics, settings, setS
                     )}
                   </div>
                 )}
-                
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-md w-full mb-lg">
                   {shuffledWords[currentIndex].options.map((opt, i) => {
                     const isSelected = selectedOption && selectedOption.id === opt.id;
                     const isCorrectAnswer = opt.id === shuffledWords[currentIndex].word.id;
-                    
+
                     let borderClass = "border-hairline hover:border-primary hover:bg-primary/5";
                     let bgClass = "bg-surface";
                     let textClass = "text-ink";
                     let badgeClass = "bg-surface-container-low text-primary group-hover:bg-primary group-hover:text-surface";
-                    
+
                     if (selectedOption) {
                       if (isCorrectAnswer) {
                         borderClass = "border-accent-green";
@@ -440,7 +578,7 @@ export function ListeningPractice({ words, activeTopicId, topics, settings, setS
                           </span>
                           <span className={textClass}>{opt.word}</span>
                         </div>
-                        
+
                         {selectedOption && (isCorrectAnswer || isSelected) && (
                           <div className={`mt-sm ml-[48px] text-body-sm font-body-sm ${textClass}`}>
                             {opt.meaning}
@@ -538,6 +676,169 @@ export function ListeningPractice({ words, activeTopicId, topics, settings, setS
                 ))}
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {testState === 'playing_ielts' && ieltsTest && (
+        <div className="w-full max-w-5xl flex flex-col md:flex-row gap-lg py-lg">
+
+          <div className="md:w-1/3 flex flex-col gap-lg sticky top-lg h-fit">
+            <div className="bg-surface border border-hairline rounded-[16px] p-xl shadow-sm text-center">
+              <h3 className="font-heading-3 text-heading-3 text-ink mb-md">IELTS Listening (Mini Test)</h3>
+
+              <div className="w-24 h-24 mx-auto bg-accent-purple/10 rounded-full flex items-center justify-center mb-lg shadow-inner border border-accent-purple/20">
+                <Volume2 size={48} className="text-accent-purple" />
+              </div>
+
+              <p className="font-body-md text-body-md text-ink-muted mb-lg">
+                Hãy chuẩn bị sẵn sàng. Audio chỉ được nghe 1 lần duy nhất!
+              </p>
+
+              {audioState === 'idle' ? (
+                <button
+                  onClick={playIeltsAudio}
+                  className="w-full bg-accent-purple text-surface font-button text-button py-md rounded-full shadow-md hover:bg-accent-purple/90 hover:-translate-y-0.5 transition-all flex justify-center items-center gap-xs"
+                >
+                  <Play size={20} fill="currentColor" /> Phát Audio
+                </button>
+              ) : audioState === 'playing' ? (
+                <div className="w-full flex items-center justify-center gap-sm bg-accent-sky/10 text-accent-sky font-title text-title py-md rounded-full border border-accent-sky/20">
+                  <span className="flex gap-[2px]">
+                    <span className="w-1.5 h-4 bg-accent-sky rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                    <span className="w-1.5 h-6 bg-accent-sky rounded-full animate-bounce" style={{ animationDelay: '100ms' }}></span>
+                    <span className="w-1.5 h-4 bg-accent-sky rounded-full animate-bounce" style={{ animationDelay: '200ms' }}></span>
+                  </span>
+                  Đang phát...
+                </div>
+              ) : (
+                <div className="w-full bg-surface-container-low text-ink-muted font-title text-title py-md rounded-full border border-hairline flex flex-col items-center justify-center">
+                  <span>Audio đã kết thúc.</span>
+                </div>
+              )}
+            </div>
+
+            {audioState === 'finished' && (
+              <div className="bg-surface border border-hairline rounded-[16px] p-lg shadow-sm text-center flex flex-col items-center justify-center">
+                <Clock size={32} className={`${timeLeft <= 30 ? 'text-accent-orange animate-pulse' : 'text-ink-muted'} mb-sm`} />
+                <div className={`font-display-2 text-display-2 ${timeLeft <= 30 ? 'text-accent-orange' : 'text-ink'} mb-xs`}>
+                  {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
+                </div>
+                <div className="font-eyebrow text-eyebrow text-ink-muted uppercase mb-lg">Thời gian kiểm tra lại</div>
+
+                <button
+                  onClick={submitIeltsTest}
+                  className="w-full bg-primary text-on-primary font-button text-button py-md rounded-full shadow-md hover:bg-primary-active hover:shadow-lg transition-all"
+                >
+                  Nộp bài ngay
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="md:w-2/3 space-y-xl">
+            {ieltsTest.questions.map((q, idx) => (
+              <div key={idx} className={`bg-canvas-soft p-md rounded-[12px] border ${audioState === 'idle' ? 'blur-sm pointer-events-none select-none opacity-50' : 'border-hairline'} transition-all duration-500`}>
+                <p className="font-title text-title text-ink mb-md">{idx + 1}. {q.text}</p>
+                <div className="space-y-sm">
+                  {q.type === 'gap_fill' || !q.options || q.options.length === 0 ? (
+                    <input
+                      type="text"
+                      placeholder="Nhập câu trả lời..."
+                      value={ieltsAnswers[idx] || ''}
+                      onChange={(e) => setIeltsAnswers({ ...ieltsAnswers, [idx]: e.target.value })}
+                      className="w-full bg-surface border border-hairline rounded-[8px] p-sm font-title text-title text-ink focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-shadow"
+                    />
+                  ) : (
+                    q.options.map((opt, optIdx) => (
+                      <button
+                        key={optIdx}
+                        onClick={() => setIeltsAnswers({ ...ieltsAnswers, [idx]: opt })}
+                        className={`w-full text-left p-sm rounded-[8px] border transition-all ${ieltsAnswers[idx] === opt ? 'bg-primary/10 border-primary text-primary font-bold' : 'bg-surface border-hairline text-ink hover:bg-surface-container-low'}`}
+                      >
+                        {opt}
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {testState === 'results_ielts' && ieltsTest && (
+        <div className="w-full max-w-5xl flex flex-col md:flex-row gap-lg py-lg">
+          <div className="md:w-1/3 flex flex-col gap-lg sticky top-lg h-fit">
+            <div className="bg-surface border border-hairline rounded-[16px] p-xl shadow-sm">
+              <h2 className="font-display-2 text-display-2 text-ink mb-sm text-center">Kết quả IELTS Listening</h2>
+              <div className="flex justify-center gap-xl mt-lg">
+                <div className="text-center">
+                  <div className="font-display-1 text-display-1 text-accent-green">
+                    {ieltsTest.questions.filter((q, i) => ieltsAnswers[i]?.toString().trim().toLowerCase() === q.correctAnswer?.toString().trim().toLowerCase()).length} / {ieltsTest.questions.length}
+                  </div>
+                  <div className="font-eyebrow text-eyebrow text-ink-muted uppercase">Số câu đúng</div>
+                </div>
+                <div className="w-px bg-hairline"></div>
+                <div className="text-center">
+                  <div className="font-display-1 text-display-1 text-primary">
+                    {calculateBandScore(ieltsTest.questions.filter((q, i) => ieltsAnswers[i]?.toString().trim().toLowerCase() === q.correctAnswer?.toString().trim().toLowerCase()).length, ieltsTest.questions.length)}
+                  </div>
+                  <div className="font-eyebrow text-eyebrow text-ink-muted uppercase">Band điểm dự kiến</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-canvas-soft border border-hairline rounded-[16px] p-lg max-h-[500px] overflow-y-auto">
+              <h3 className="font-heading-3 text-heading-3 text-ink mb-sm flex items-center gap-xs"><FileText size={20} /> Transcript (Kịch bản)</h3>
+              <p className="font-body-sm text-body-sm text-ink leading-relaxed whitespace-pre-wrap">{ieltsTest.transcript}</p>
+            </div>
+
+            <button
+              onClick={() => { setTestState('setup'); }}
+              className="w-full bg-surface-container-high text-on-surface font-button text-button py-md rounded-full hover:bg-surface-container-highest transition-colors flex items-center justify-center gap-sm shadow-sm"
+            >
+              <RotateCcw size={20} /> Thi lại Mini Test khác
+            </button>
+          </div>
+
+          <div className="md:w-2/3 space-y-lg mb-xl">
+            {ieltsTest.questions.map((q, idx) => {
+              const isCorrect = ieltsAnswers[idx]?.toString().trim().toLowerCase() === q.correctAnswer?.toString().trim().toLowerCase();
+              return (
+                <div key={idx} className={`p-lg rounded-[12px] border ${isCorrect ? 'bg-accent-green/5 border-accent-green/20' : 'bg-accent-orange/5 border-accent-orange/20'}`}>
+                  <p className="font-title text-title text-ink mb-sm">{idx + 1}. {q.text}</p>
+                  <p className="font-body-md text-body-md text-ink-muted mb-md">
+                    Đáp án của bạn: <span className={isCorrect ? 'text-accent-green font-bold' : 'text-accent-orange font-bold line-through decoration-2'}>{ieltsAnswers[idx] || '(Chưa làm)'}</span>
+                  </p>
+                  {!isCorrect && (
+                    <p className="font-body-md text-body-md text-accent-green mb-md font-bold">
+                      Đáp án đúng: {q.correctAnswer}
+                    </p>
+                  )}
+
+                  {isFetchingExplanation[idx] ? (
+                    <div className="flex items-center gap-xs text-primary font-body-sm mt-sm">
+                      <Loader2 size={16} className="animate-spin" />
+                      <span>Đang giải thích...</span>
+                    </div>
+                  ) : ieltsExplanation[idx] ? (
+                    <div className="mt-md p-md bg-surface rounded-[8px] border border-hairline font-body-sm text-ink leading-relaxed">
+                      <strong className="text-primary block mb-xs">Giải thích:</strong>
+                      {ieltsExplanation[idx]}
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => handleExplainIelts(idx, q)}
+                      className="mt-sm text-primary font-button text-button hover:underline flex items-center gap-xs"
+                    >
+                      <BookOpen size={16} />
+                      Tại sao lại chọn đáp án này?
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

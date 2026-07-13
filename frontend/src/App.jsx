@@ -269,6 +269,7 @@ function LearningApp() {
                 words={words}
                 activeTopicId={activeTopicId}
                 topics={topics}
+                settings={settings}
                 setSrData={setSrData}
               />
             </div>

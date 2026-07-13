@@ -8,6 +8,29 @@ import {
 export const GEMINI_DEFAULT_KEY = import.meta.env.VITE_GEMINI_DEFAULT_KEY || "";
 export const GEMINI_DEFAULT_MODEL = import.meta.env.VITE_GEMINI_DEFAULT_MODEL || "gemini-3.1-flash-lite-preview";
 
+export async function explainReadingAnswer({ sentence, word, isCorrect, selectedOption }, apiKey, model) {
+  const prompt = `Bạn là một giáo viên tiếng Anh. Học sinh đang làm bài tập điền từ vào chỗ trống.
+Câu: "${sentence}"
+Học sinh đã chọn đáp án: "${selectedOption}" (đây là đáp án ${isCorrect ? 'đúng' : 'sai'}).
+Hãy giải thích ngắn gọn (1-2 câu tiếng Việt) tại sao đáp án này lại đúng/sai trong ngữ cảnh của câu. Nếu sai, hãy giải thích nghĩa của đáp án đúng (${word}) để làm rõ.`;
+
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { 
+        temperature: 0.7,
+        responseMimeType: "text/plain"
+      }
+    })
+  });
+
+  if (!response.ok) throw new Error("Lỗi kết nối AI.");
+  const data = await response.json();
+  return data.candidates[0].content.parts[0].text;
+}
+
 export async function generateWordsFromText(text, apiKey, model) {
   const prompt = `Phân tích từ vựng và trả về mảng JSON. Format: [{"word":"","phonetic":"","meaning":"","example":""}]. Từ vựng: ${text}`;
 
@@ -415,6 +438,115 @@ Return ONLY JSON with this schema:
   const data = await response.json();
   const text = data.candidates[0].content.parts[0].text;
   return JSON.parse(text);
+}
+
+export async function generateIELTSReadingTest(wordList, difficulty, apiKey, model) {
+  const wordSummary = wordList.map(w => `${w.word}:${w.meaning}`).join(' | ');
+  
+  const systemInstruction = `You are an IELTS Academic Reading examiner.
+Generate a Mini IELTS Reading test (1 passage, 13-14 questions).
+The reading passage MUST be academic and roughly 600-800 words.
+Incorporate as many of these words as possible naturally: ${wordSummary}.
+
+Questions should include a mix of:
+- multiple_choice
+- true_false_not_given
+- gap_fill
+
+Return ONLY one JSON object with this exact schema:
+{
+  "title": "Passage Title",
+  "passage": "Passage text...",
+  "questions": [
+    {
+      "id": 1,
+      "type": "multiple_choice",
+      "text": "Question text...",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correctAnswer": "Option A",
+      "explanation": "Vietnamese explanation of why this is correct based on the passage"
+    },
+    {
+      "id": 2,
+      "type": "true_false_not_given",
+      "text": "Statement...",
+      "options": ["True", "False", "Not Given"],
+      "correctAnswer": "True",
+      "explanation": "Vietnamese explanation"
+    },
+    {
+      "id": 3,
+      "type": "gap_fill",
+      "text": "Sentence with ____ blank...",
+      "options": [],
+      "correctAnswer": "exact word(s) from passage",
+      "explanation": "Vietnamese explanation"
+    }
+  ]
+}
+Do NOT include Markdown formatting outside the JSON block.`;
+
+  const prompt = `Topic difficulty: ${difficulty}. Generate the Mini IELTS Reading test now.`;
+
+  const result = await callGeminiJson({
+    apiKey,
+    model,
+    systemInstruction,
+    prompt,
+    generationConfig: { temperature: 0.8 },
+  });
+
+  return result;
+}
+
+export async function generateIELTSListeningTest(wordList, difficulty, apiKey, model) {
+  const wordSummary = wordList.map(w => `${w.word}:${w.meaning}`).join(' | ');
+  
+  const systemInstruction = `You are an IELTS Academic Listening examiner.
+Generate a Mini IELTS Listening test (1 section, roughly 10-15 questions).
+The audio transcript MUST be an academic monologue (similar to Part 4) and roughly 500-700 words.
+Incorporate as many of these words as possible naturally: ${wordSummary}.
+
+Questions should include a mix of:
+- multiple_choice
+- gap_fill
+
+Return ONLY one JSON object with this exact schema:
+{
+  "title": "Transcript Title",
+  "transcript": "Full text of the monologue to be spoken by TTS...",
+  "questions": [
+    {
+      "id": 1,
+      "type": "multiple_choice",
+      "text": "Question text...",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correctAnswer": "Option A",
+      "explanation": "Vietnamese explanation of why this is correct based on the transcript"
+    },
+    {
+      "id": 2,
+      "type": "gap_fill",
+      "text": "Sentence with ____ blank...",
+      "options": [],
+      "correctAnswer": "exact word(s) from transcript",
+      "explanation": "Vietnamese explanation"
+    }
+  ]
+}
+Do NOT include Markdown formatting outside the JSON block.`;
+
+  const prompt = `Topic difficulty: ${difficulty}. Generate the Mini IELTS Listening test now.`;
+
+  const result = await callGeminiJson({
+    apiKey,
+    model,
+    systemInstruction,
+    prompt,
+    generationConfig: { temperature: 0.8 },
+  });
+
+  return result;
 }
 
 // ─── Writing Practice AI Functions ───────────────────────────
