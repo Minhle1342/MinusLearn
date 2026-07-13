@@ -21,6 +21,9 @@ async def lifespan(app: FastAPI):
     await client.close()
 
 
+import os
+from fastapi.staticfiles import StaticFiles
+
 settings = get_settings()
 app = FastAPI(title="MinusLearn API", version="1.0.0", lifespan=lifespan)
 app.add_middleware(
@@ -30,10 +33,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+os.makedirs("uploadImage", exist_ok=True)
+app.mount("/uploadImage", StaticFiles(directory="uploadImage"), name="uploadImage")
+
 app.include_router(auth.router)
 app.include_router(data.router)
 app.include_router(backups.router)
-
 
 @app.get("/api/health")
 async def health():

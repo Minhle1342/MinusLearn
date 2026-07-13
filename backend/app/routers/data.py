@@ -250,3 +250,32 @@ async def put_exam_writing_draft(payload: dict = Body(...), user=Depends(get_cur
 @router.delete("/exam-writing-draft", status_code=204)
 async def delete_exam_writing_draft(user=Depends(get_current_user), database=Depends(get_database)):
     await database.exam_writing_drafts.delete_many({"userId": user_id(user)})
+
+
+@router.post("/download-image")
+async def download_image(payload: dict = Body(...), user=Depends(get_current_user)):
+    url = payload.get("url")
+    if not url:
+        raise HTTPException(status_code=400, detail="Missing url")
+    
+    import httpx
+    from pathlib import Path
+    import uuid
+
+    upload_dir = Path("uploadImage")
+    upload_dir.mkdir(exist_ok=True)
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url, follow_redirects=True)
+            r.raise_for_status()
+            
+            # Simple assumption that the file is an image
+            filename = f"{uuid.uuid4().hex}.jpg"
+            file_path = upload_dir / filename
+            file_path.write_bytes(r.content)
+            
+            # Return relative path for frontend to use via backend's static file serving
+            return {"localImageUrl": f"/uploadImage/{filename}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

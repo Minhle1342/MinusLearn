@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Sparkles, Image as ImageIcon } from 'lucide-react';
 import { generateWordsFromText, generateImageForWord } from '../../services/api';
+import { downloadExternalImage } from '../../services/backendApi';
 
 export function WordModal({ isOpen, onClose, wordToEdit, onSave, onDelete, activeTopicId, settings, initialAiText }) {
   const [activeTab, setActiveTab] = useState('manual');
@@ -40,10 +41,16 @@ export function WordModal({ isOpen, onClose, wordToEdit, onSave, onDelete, activ
 
   if (!isOpen) return null;
 
-  const handleManualSubmit = (e) => {
+  const handleManualSubmit = async (e) => {
     e.preventDefault();
     if (formData.word.trim()) {
-      onSave({ ...formData, topicId: activeTopicId });
+      setIsGeneratingImage(true);
+      let localImageUrl = formData.localImageUrl || null;
+      if (formData.imageUrl && formData.imageUrl.startsWith('http') && !localImageUrl) {
+        localImageUrl = await downloadExternalImage(formData.imageUrl);
+      }
+      onSave({ ...formData, topicId: activeTopicId, localImageUrl });
+      setIsGeneratingImage(false);
       onClose();
     }
   };
@@ -56,12 +63,16 @@ export function WordModal({ isOpen, onClose, wordToEdit, onSave, onDelete, activ
 
       for (const w of words) {
         let imageUrl = '';
+        let localImageUrl = null;
         try {
           imageUrl = await generateImageForWord(w.word, { 
             pixabayApiKey: settings.pixabayApiKey, 
             unsplashApiKey: settings.unsplashApiKey, 
             pexelsApiKey: settings.pexelsApiKey 
           });
+          if (imageUrl) {
+            localImageUrl = await downloadExternalImage(imageUrl);
+          }
         } catch (e) {
           console.error("Image generation failed:", e);
         }
@@ -74,6 +85,7 @@ export function WordModal({ isOpen, onClose, wordToEdit, onSave, onDelete, activ
           meaning: w.meaning,
           example: w.example,
           imageUrl,
+          localImageUrl,
           createdAt: Date.now()
         }, false); // pass false if we don't want to close immediately, but we need to handle that in App
       }
@@ -94,7 +106,7 @@ export function WordModal({ isOpen, onClose, wordToEdit, onSave, onDelete, activ
         unsplashApiKey: settings.unsplashApiKey, 
         pexelsApiKey: settings.pexelsApiKey 
       }, imageApiIndex);
-      setFormData({ ...formData, imageUrl: url });
+      setFormData({ ...formData, imageUrl: url, localImageUrl: null });
       setImageApiIndex(prev => prev + 1);
     } catch (e) {
       alert("Không thể tạo ảnh: " + e.message);
@@ -157,7 +169,7 @@ export function WordModal({ isOpen, onClose, wordToEdit, onSave, onDelete, activ
               <div className="flex flex-col gap-xs">
                 <label className="font-body-sm text-body-sm font-semibold text-on-surface-variant">Link ảnh minh họa</label>
                 <div className="flex gap-2">
-                  <input type="url" value={formData.imageUrl} onChange={e => setFormData({ ...formData, imageUrl: e.target.value })} className="flex-1 px-sm py-xs bg-surface-container-lowest border border-hairline rounded-[4px] font-body-md focus:ring-2 focus:ring-primary outline-none" placeholder="https://..." />
+                  <input type="url" value={formData.imageUrl} onChange={e => setFormData({ ...formData, imageUrl: e.target.value, localImageUrl: null })} className="flex-1 px-sm py-xs bg-surface-container-lowest border border-hairline rounded-[4px] font-body-md focus:ring-2 focus:ring-primary outline-none" placeholder="https://..." />
                   <button
                     type="button"
                     onClick={handleGenerateImage}

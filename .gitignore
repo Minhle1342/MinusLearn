@@ -23,6 +23,11 @@ dist/
 build/
 coverage/
 .vite/
+frontend/dist/
+
+# Uploads & User Data
+backend/uploadImage/
+uploadImage/
 
 # Logs
 *.log

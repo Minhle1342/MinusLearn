@@ -1,9 +1,24 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Volume2, Edit2 } from 'lucide-react';
 import { speakEnglishText } from '../../utils/speech';
+import { API_BASE_URL } from '../../services/backendApi';
 
 export function WordCard({ word, onEdit, viewMode = 'card', settings }) {
   const [isFlipped, setIsFlipped] = useState(false);
+  const [imgSrc, setImgSrc] = useState(word.imageUrl || (word.localImageUrl ? API_BASE_URL + word.localImageUrl : null));
+
+  useEffect(() => {
+    setImgSrc(word.imageUrl || (word.localImageUrl ? API_BASE_URL + word.localImageUrl : null));
+  }, [word.imageUrl, word.localImageUrl]);
+
+  const handleImageError = () => {
+    if (word.localImageUrl) {
+      const localUrl = API_BASE_URL + word.localImageUrl;
+      if (imgSrc !== localUrl) {
+        setImgSrc(localUrl);
+      }
+    }
+  };
 
   const speak = (e) => {
     e.stopPropagation();
@@ -44,31 +59,31 @@ export function WordCard({ word, onEdit, viewMode = 'card', settings }) {
           {/* Back Face */}
           <div className="absolute inset-0 [backface-visibility:hidden] [transform:rotateY(180deg)] bg-surface border border-hairline rounded-[12px] shadow-sm overflow-hidden flex flex-col justify-center p-lg">
             {/* Background Image if exists */}
-            {word.imageUrl ? (
+            {imgSrc ? (
               <>
                 <div className="absolute inset-0 bg-black/70 z-10 backdrop-blur-sm"></div>
-                <img src={word.imageUrl} alt={word.word} referrerPolicy="no-referrer" className="absolute inset-0 w-full h-full object-cover z-0" />
+                <img src={imgSrc} onError={handleImageError} alt={word.word} referrerPolicy="no-referrer" className="absolute inset-0 w-full h-full object-cover z-0" />
               </>
             ) : (
               <div className="absolute inset-0 bg-surface z-0"></div>
             )}
 
-            <div className={`relative z-20 flex flex-col gap-sm items-center text-center ${word.imageUrl ? 'text-white' : 'text-on-surface'}`}>
+            <div className={`relative z-20 flex flex-col gap-sm items-center text-center ${imgSrc ? 'text-white' : 'text-on-surface'}`}>
               <div className="flex flex-col items-center gap-1">
-                <h3 className={`font-title text-title ${word.imageUrl ? 'text-white' : 'text-on-surface'}`}>{word.word}</h3>
+                <h3 className={`font-title text-title ${imgSrc ? 'text-white' : 'text-on-surface'}`}>{word.word}</h3>
                 {word.phonetic && (
-                  <span className={`font-mono text-sm px-2 py-0.5 rounded-md ${word.imageUrl ? 'bg-white/20 text-white' : 'bg-surface-container text-on-surface-variant'}`}>
+                  <span className={`font-mono text-sm px-2 py-0.5 rounded-md ${imgSrc ? 'bg-white/20 text-white' : 'bg-surface-container text-on-surface-variant'}`}>
                     {word.phonetic}
                   </span>
                 )}
               </div>
 
-              <p className={`font-body-lg text-lg line-clamp-4 mt-2 ${word.imageUrl ? 'text-white/90' : 'text-on-surface-variant'}`}>
+              <p className={`font-body-lg text-lg line-clamp-4 mt-2 ${imgSrc ? 'text-white/90' : 'text-on-surface-variant'}`}>
                 {word.meaning}
               </p>
 
               {word.example && (
-                <div className={`mt-2 pt-3 border-t w-full border-dashed ${word.imageUrl ? 'border-white/30 text-white/80' : 'border-hairline text-on-surface-variant'}`}>
+                <div className={`mt-2 pt-3 border-t w-full border-dashed ${imgSrc ? 'border-white/30 text-white/80' : 'border-hairline text-on-surface-variant'}`}>
                   <p className="font-body-sm text-sm italic line-clamp-3">
                     "{word.example}"
                   </p>
@@ -94,8 +109,8 @@ export function WordCard({ word, onEdit, viewMode = 'card', settings }) {
       className="group relative bg-canvas border border-hairline rounded-[12px] overflow-hidden hover:shadow-md transition-all duration-300 ease-in-out hover:-translate-y-1 flex flex-col"
     >
       <div className="h-40 w-full overflow-hidden bg-surface-container-lowest relative cursor-pointer" onClick={handleEditClick}>
-        {word.imageUrl ? (
-          <img src={word.imageUrl} alt={word.word} referrerPolicy="no-referrer" className="w-full h-full object-contain transition-transform duration-500 group-hover:scale-105" />
+        {imgSrc ? (
+          <img src={imgSrc} onError={handleImageError} alt={word.word} referrerPolicy="no-referrer" className="w-full h-full object-contain transition-transform duration-500 group-hover:scale-105" />
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center text-on-surface-variant bg-surface-container">
             <span className="text-sm">No image</span>

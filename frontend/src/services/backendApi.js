@@ -91,5 +91,18 @@ export async function logoutAccount() {
   }
 }
 
+export async function downloadExternalImage(url) {
+  try {
+    const data = await apiRequest('/api/download-image', {
+      method: 'POST',
+      body: { url }
+    });
+    return data.localImageUrl;
+  } catch (err) {
+    console.error("Failed to download image:", err);
+    return null;
+  }
+}
+
 export { API_BASE_URL };
 
