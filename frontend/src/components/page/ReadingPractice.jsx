@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BookOpen, CheckCircle2, XCircle } from 'lucide-react';
-import { useLocalStorage } from '../../hooks/useLocalStorage';
+import { useRemoteStorage } from '../../hooks/useRemoteStorage';
 
 export function ReadingPractice({ words, activeTopicId, topics, setSrData }) {
   const [testState, setTestState] = useState('setup'); // setup, playing, results
@@ -14,7 +14,7 @@ export function ReadingPractice({ words, activeTopicId, topics, setSrData }) {
   const [results, setResults] = useState([]);
   const [selectedOption, setSelectedOption] = useState(null);
 
-  const [mistakes, setMistakes] = useLocalStorage('minuslearn_reading_mistakes', {});
+  const [mistakes, setMistakes] = useRemoteStorage('minuslearn_reading_mistakes', {});
 
   const topicWords = words.filter(w => w.topicId === activeTopicId);
   const currentTopic = topics.find(t => t.id === activeTopicId);

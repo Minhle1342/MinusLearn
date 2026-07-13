@@ -21,26 +21,55 @@ MinusLearn is an English vocabulary learning website organized by topic. It is d
 - Vite 5
 - Tailwind CSS
 - Lucide React
-- LocalStorage for browser-side learning data storage
+- FastAPI (Python)
+- MongoDB Atlas
+- JWT authentication with HttpOnly refresh cookies
 
 ## Project structure
 
 ```text
 frontend/   Main web application
+backend/    FastAPI API, authentication, MongoDB persistence, backup and migration
 extension/  Chrome extension for sending clipped text to MinusLearn
 .agent/     Design notes and UI direction documents
 ```
 
 ## Run locally
 
-### 1. Install dependencies
+### 1. Configure MongoDB Atlas
+
+Create an Atlas database user with access to one database and copy its connection string. Create `backend/.env` from `backend/.env.example`:
+
+```env
+MONGODB_URI=mongodb+srv://<username>:<password>@<cluster>/minuslearn?retryWrites=true&w=majority
+MONGODB_DB=minuslearn
+JWT_SECRET=<long-random-secret>
+CORS_ORIGINS=http://localhost:5173
+COOKIE_SECURE=false
+```
+
+For production, use HTTPS, set `COOKIE_SECURE=true`, restrict `CORS_ORIGINS`, and keep all secrets outside version control.
+
+### 2. Install and run the backend
+
+```powershell
+py -m venv backend\.venv
+backend\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
+Copy-Item backend\.env.example backend\.env
+cd backend
+.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
+```
+
+FastAPI health and API documentation are available at `http://localhost:8000/api/health` and `http://localhost:8000/docs`.
+
+### 3. Install frontend dependencies
 
 ```bash
 cd frontend
 npm install
 ```
 
-### 2. Create the environment file
+### 4. Create the frontend environment file
 
 Copy the example file:
 
@@ -59,9 +88,10 @@ Current environment variables:
 ```env
 VITE_GEMINI_DEFAULT_KEY=
 VITE_GEMINI_DEFAULT_MODEL=gemini-3.1-flash-lite-preview
+VITE_API_BASE_URL=http://localhost:8000
 ```
 
-### 3. Start the dev server
+### 5. Start the dev server
 
 ```bash
 npm run dev
@@ -69,7 +99,7 @@ npm run dev
 
 By default, Vite runs at `http://localhost:5173`.
 
-### 4. Build for production
+### 6. Build for production
 
 ```bash
 npm run build
@@ -100,14 +130,17 @@ To install it manually in Chrome:
 
 ## Current notes
 
-- Learning data is currently stored in LocalStorage, and there is no backend account sync yet.
-- The API key is read from frontend environment variables or saved in the user's local settings.
+- Learning data is stored in MongoDB and scoped to the authenticated account.
+- AI/image API keys remain device-local and are never included in MongoDB backup or migration payloads.
+- Settings → Data can export/restore a cloud backup and manually import a version 1 LocalStorage backup into an empty account.
 - `frontend/.env` is ignored to avoid committing sensitive data.
 
-## Project status
+## Tests
 
-The website currently builds successfully in a local environment and can be extended further in areas such as:
-
-- Adding a backend and authentication for data sync
-- Improving the AI workflow and error handling
-- Expanding extension support to more domains
+```powershell
+backend\.venv\Scripts\python.exe -m pytest backend
+cd frontend
+npm run test:writing-visuals
+npm run test:exam-writing
+npm run build
+```

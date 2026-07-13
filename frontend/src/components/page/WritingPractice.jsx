@@ -13,7 +13,7 @@ import {
 } from '../../services/api';
 import {
   createSession, updateSession, getLatestDraft, deleteSession,
-  addSentenceMistake, getSentenceMistakes, clearSentenceMistakes
+  addSentenceMistake, getSentenceMistakes
 } from '../../services/writingSessionService';
 import { WritingVisual } from './WritingVisual';
 import { inferTask1VisualKind, validateWritingVisuals } from '../../utils/writingVisuals';
@@ -57,7 +57,15 @@ function SentencePractice({ words, activeTopicId, topics, onBack }) {
   const [feedback, setFeedback] = useState(null); // null | 'correct' | 'wrong'
   const inputRef = useRef(null);
 
-  const mistakes = getSentenceMistakes(activeTopicId);
+  const [mistakes, setMistakes] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getSentenceMistakes(activeTopicId)
+      .then(items => { if (!cancelled) setMistakes(items); })
+      .catch(error => console.error('Không thể tải lỗi viết câu:', error));
+    return () => { cancelled = true; };
+  }, [activeTopicId]);
 
   const handleStart = () => {
     if (topicWords.length === 0) return;
@@ -83,12 +91,15 @@ function SentencePractice({ words, activeTopicId, topics, onBack }) {
     setFeedback(isCorrect ? 'correct' : 'wrong');
 
     if (!isCorrect) {
-      addSentenceMistake({
+      const mistake = {
         wordId: current.id,
         expected,
         userInput,
         topicId: activeTopicId,
-      });
+      };
+      addSentenceMistake(mistake)
+        .then(saved => setMistakes(previous => [...previous, saved]))
+        .catch(error => console.error('Không thể lưu lỗi viết câu:', error));
     }
 
     setTimeout(() => {
@@ -338,8 +349,9 @@ export function WritingPractice({ words, topics, activeTopicId, settings, onOpen
 
   // ── Restore draft on mount ──
   useEffect(() => {
-    const draft = getLatestDraft();
-    if (draft) {
+    let cancelled = false;
+    getLatestDraft().then(draft => {
+      if (!draft || cancelled) return;
       const elapsed = Math.floor((Date.now() - draft.startedAt) / 1000);
       const remaining = Math.max(0, draft.duration - elapsed);
 
@@ -356,10 +368,10 @@ export function WritingPractice({ words, topics, activeTopicId, settings, onOpen
         setPhase('practice');
         setTimerActive(true);
       } else {
-        // Expired draft, delete it to prevent getting stuck
-        deleteSession(draft.id);
+        deleteSession(draft.id).catch(error => console.error('Không thể xóa draft hết hạn:', error));
       }
-    }
+    }).catch(error => console.error('Không thể tải draft Writing:', error));
+    return () => { cancelled = true; };
   }, []);
 
   // ── Timer ──
@@ -389,7 +401,7 @@ export function WritingPractice({ words, topics, activeTopicId, settings, onOpen
   useEffect(() => {
     if (phase !== 'practice' || !sessionId) return;
     autoSaveRef.current = setInterval(() => {
-      updateSession(sessionId, { essay });
+      updateSession(sessionId, { essay }).catch(error => console.error('Không thể autosave Writing:', error));
     }, 10000);
     return () => clearInterval(autoSaveRef.current);
   }, [phase, sessionId, essay]);
@@ -466,9 +478,15 @@ export function WritingPractice({ words, topics, activeTopicId, settings, onOpen
     setError('');
 
     const durationSec = duration * 60;
-    const session = createSession({
-      taskType, task1VisualKind, bandTarget, prompt, visuals, outline: '', duration: durationSec,
-    });
+    let session;
+    try {
+      session = await createSession({
+        taskType, task1VisualKind, bandTarget, prompt, visuals, outline: '', duration: durationSec,
+      });
+    } catch (requestError) {
+      setError(requestError.message || 'Không thể tạo Writing session trên máy chủ.');
+      return;
+    }
     setSessionId(session.id);
     setWritingPrompt(prompt);
     setEssay('');
@@ -508,17 +526,16 @@ export function WritingPractice({ words, topics, activeTopicId, settings, onOpen
     setTimerActive(false);
     clearInterval(autoSaveRef.current);
 
-    // Save before submit
-    updateSession(sessionId, { essay, status: 'submitted' });
-
     try {
+      // Save before submit
+      await updateSession(sessionId, { essay, status: 'submitted' });
       setPhase('evaluating');
       const result = await evaluateWritingSubmission(
         { prompt: writingPrompt, outline: outline.join('\n'), essay, taskType, bandTarget, visuals },
         apiKey, settings.model
       );
       setEvaluation(result);
-      updateSession(sessionId, { evaluation: result, status: 'evaluated' });
+      await updateSession(sessionId, { evaluation: result, status: 'evaluated' });
       setPhase('result');
     } catch (err) {
       setError(err.message || 'Lỗi khi chấm bài. Draft đã được lưu.');
@@ -531,7 +548,7 @@ export function WritingPractice({ words, topics, activeTopicId, settings, onOpen
   // ── Reset ──
   const handleReset = () => {
     if (sessionId) {
-      deleteSession(sessionId);
+      deleteSession(sessionId).catch(error => console.error('Không thể xóa Writing session:', error));
     }
     setMode(null);
     setPhase('setup');

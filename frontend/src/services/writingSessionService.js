@@ -1,112 +1,69 @@
-/**
- * Writing Session Service
- * Manages IELTS writing sessions in localStorage.
- * Designed to be swapped for a real backend later.
- */
-
-const SESSIONS_KEY = 'minuslearn_writing_sessions';
-const SENTENCE_MISTAKES_KEY = 'minuslearn_writing_sentence_mistakes';
-
-// ─── Session CRUD ────────────────────────────────────────────
-
-function _readSessions() {
-  try {
-    return JSON.parse(localStorage.getItem(SESSIONS_KEY) || '[]');
-  } catch {
-    return [];
-  }
-}
-
-function _writeSessions(sessions) {
-  localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
-}
-
-export function createSession({ taskType, task1VisualKind, bandTarget, prompt, visuals, outline, duration }) {
-  const session = {
-    id: crypto.randomUUID(),
-    taskType,
-    task1VisualKind: task1VisualKind || 'chart',
-    bandTarget,
-    prompt,
-    visuals: visuals || [],
-    outline: outline || '',
-    essay: '',
-    startedAt: Date.now(),
-    duration,           // in seconds
-    status: 'draft',    // 'draft' | 'submitted' | 'evaluated'
-    evaluation: null,
-    autoSaveAt: null,
-  };
-  const sessions = _readSessions();
-  sessions.push(session);
-  _writeSessions(sessions);
-  return session;
-}
-
-export function updateSession(id, data) {
-  const sessions = _readSessions();
-  const idx = sessions.findIndex(s => s.id === id);
-  if (idx === -1) return null;
-  sessions[idx] = { ...sessions[idx], ...data, autoSaveAt: Date.now() };
-  _writeSessions(sessions);
-  return sessions[idx];
-}
+import { apiRequest } from './backendApi';
 
 
-export function getSession(id) {
-  return _readSessions().find(s => s.id === id) || null;
-}
-
-export function listSessions() {
-  return _readSessions().sort((a, b) => b.startedAt - a.startedAt);
-}
-
-export function deleteSession(id) {
-  const sessions = _readSessions().filter(s => s.id !== id);
-  _writeSessions(sessions);
-}
-
-export function getLatestDraft() {
-  return _readSessions().find(s => s.status === 'draft') || null;
-}
-
-// ─── Sentence Mistakes CRUD ──────────────────────────────────
-
-function _readMistakes() {
-  try {
-    return JSON.parse(localStorage.getItem(SENTENCE_MISTAKES_KEY) || '[]');
-  } catch {
-    return [];
-  }
-}
-
-function _writeMistakes(mistakes) {
-  localStorage.setItem(SENTENCE_MISTAKES_KEY, JSON.stringify(mistakes));
-}
-
-export function addSentenceMistake({ wordId, expected, userInput, topicId }) {
-  const mistakes = _readMistakes();
-  mistakes.push({
-    id: crypto.randomUUID(),
-    wordId,
-    expected,
-    userInput,
-    topicId,
-    timestamp: Date.now(),
+export async function createSession({ taskType, task1VisualKind, bandTarget, prompt, visuals, outline, duration }) {
+  return apiRequest('/api/writing-sessions', {
+    method: 'POST',
+    body: {
+      id: crypto.randomUUID(),
+      taskType,
+      task1VisualKind: task1VisualKind || 'chart',
+      bandTarget,
+      prompt,
+      visuals: visuals || [],
+      outline: outline || '',
+      essay: '',
+      startedAt: Date.now(),
+      duration,
+      status: 'draft',
+      evaluation: null,
+      autoSaveAt: null,
+    },
   });
-  _writeMistakes(mistakes);
 }
 
-export function getSentenceMistakes(topicId) {
-  const mistakes = _readMistakes();
-  if (topicId) return mistakes.filter(m => m.topicId === topicId);
-  return mistakes;
+export async function updateSession(id, data) {
+  return apiRequest(`/api/writing-sessions/${encodeURIComponent(id)}`, { method: 'PATCH', body: data });
 }
 
-export function clearSentenceMistakes(topicId) {
-  if (topicId) {
-    _writeMistakes(_readMistakes().filter(m => m.topicId !== topicId));
-  } else {
-    _writeMistakes([]);
-  }
+export async function getSession(id) {
+  const sessions = await apiRequest('/api/writing-sessions');
+  return sessions.find(session => session.id === id) || null;
+}
+
+export async function listSessions() {
+  return apiRequest('/api/writing-sessions');
+}
+
+export async function deleteSession(id) {
+  return apiRequest(`/api/writing-sessions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export async function getLatestDraft() {
+  const sessions = await apiRequest('/api/writing-sessions?status=draft');
+  return sessions[0] || null;
+}
+
+export async function addSentenceMistake({ wordId, expected, userInput, topicId }) {
+  return apiRequest('/api/writing-mistakes', {
+    method: 'POST',
+    body: {
+      id: crypto.randomUUID(),
+      wordId,
+      expected,
+      userInput,
+      topicId,
+      timestamp: Date.now(),
+    },
+  });
+}
+
+export async function getSentenceMistakes(topicId) {
+  const query = topicId ? `?topic_id=${encodeURIComponent(topicId)}` : '';
+  return apiRequest(`/api/writing-mistakes${query}`);
+}
+
+export async function clearSentenceMistakes(topicId) {
+  const query = topicId ? `?topic_id=${encodeURIComponent(topicId)}` : '';
+  return apiRequest(`/api/writing-mistakes${query}`, { method: 'DELETE' });
 }

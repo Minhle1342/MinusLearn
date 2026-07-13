@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Volume2, Play, RotateCcw, Check, X, CheckCircle2, XCircle } from 'lucide-react';
-import { useLocalStorage } from '../../hooks/useLocalStorage';
+import { useRemoteStorage } from '../../hooks/useRemoteStorage';
 import { speakEnglishText } from '../../utils/speech';
 
 export function ListeningPractice({ words, activeTopicId, topics, settings, setSrData }) {
@@ -18,7 +18,7 @@ export function ListeningPractice({ words, activeTopicId, topics, settings, setS
 
   const [showHint, setShowHint] = useState(false);
 
-  const [mistakes, setMistakes] = useLocalStorage('minuslearn_mistakes', {});
+  const [mistakes, setMistakes] = useRemoteStorage('minuslearn_mistakes', {});
 
   const inputRef = useRef(null);
 

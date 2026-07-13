@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { useLocalStorage } from './hooks/useLocalStorage';
+import { useRemoteStorage } from './hooks/useRemoteStorage';
+import { useAuth } from './contexts/AuthContext';
+import { AuthScreen } from './components/AuthScreen';
 import { GEMINI_DEFAULT_KEY, GEMINI_DEFAULT_MODEL } from './services/api';
 
 import { TopNavBar } from './components/TopNavBar';
@@ -15,12 +17,12 @@ import { SpeakingPractice } from './components/page/SpeakingPractice';
 import { WritingPractice } from './components/page/WritingPractice';
 import { ExamPage } from './components/page/ExamPage';
 
-function App() {
-  const [topics, setTopics] = useLocalStorage('minuslearn_topics', [
+function LearningApp() {
+  const [topics, setTopics] = useRemoteStorage('minuslearn_topics', [
     { id: 'default', name: 'General', colorClass: 'bg-accent-sky' }
   ]);
-  const [words, setWords] = useLocalStorage('minuslearn_words', []);
-  const [settings, setSettings] = useLocalStorage('minuslearn_settings', {
+  const [words, setWords] = useRemoteStorage('minuslearn_words', []);
+  const [settings, setSettings] = useRemoteStorage('minuslearn_settings', {
     apiKey: GEMINI_DEFAULT_KEY,
     model: GEMINI_DEFAULT_MODEL,
     pixabayApiKey: '',
@@ -32,14 +34,14 @@ function App() {
     speechVoiceURI: '',
     speakingAssessmentMode: 'web-speech'
   });
-  const [srData, setSrData] = useLocalStorage('minuslearn_sr_data', {});
+  const [srData, setSrData] = useRemoteStorage('minuslearn_sr_data', {});
 
   const [activeTopicId, setActiveTopicId] = useState('default');
   const [activePage, setActivePage] = useState('vocabulary');
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [mistakeFilter, setMistakeFilter] = useState('none');
-  const [viewMode, setViewMode] = useLocalStorage('minuslearn_view_mode', 'card');
+  const [viewMode, setViewMode] = useRemoteStorage('minuslearn_view_mode', 'card');
 
   const [isTopicModalOpen, setIsTopicModalOpen] = useState(false);
   const [topicToEdit, setTopicToEdit] = useState(null);
@@ -343,6 +345,15 @@ function App() {
       />
     </div>
   );
+}
+
+function App() {
+  const { user, loading } = useAuth();
+  if (loading) {
+    return <div className="min-h-screen bg-canvas flex items-center justify-center text-primary">Đang kết nối MinusLearn...</div>;
+  }
+  if (!user) return <AuthScreen />;
+  return <LearningApp />;
 }
 
 export default App;

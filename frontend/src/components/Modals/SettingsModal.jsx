@@ -1,7 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { X, Key, Bot, Palette, Volume2 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { X, Key, Bot, Palette, Volume2, Download, Upload, DatabaseBackup, LogOut } from 'lucide-react';
 import { GEMINI_DEFAULT_KEY, GEMINI_DEFAULT_MODEL } from '../../services/api';
+import { apiRequest } from '../../services/backendApi';
+import { saveDeviceCredentials } from '../../services/deviceCredentials';
 import { getEnglishVoices, speakEnglishText } from '../../utils/speech';
+import { useAuth } from '../../contexts/AuthContext';
 
 const DEFAULT_SETTINGS = {
   apiKey: GEMINI_DEFAULT_KEY,
@@ -16,10 +19,42 @@ const DEFAULT_SETTINGS = {
   speakingAssessmentMode: 'web-speech',
 };
 
+const BACKUP_VERSION = 1;
+const STORAGE_PREFIX = 'minuslearn_';
+const SENSITIVE_SETTING_KEYS = new Set([
+  'apiKey',
+  'pixabayApiKey',
+  'unsplashApiKey',
+  'pexelsApiKey',
+]);
+
+function parseStoredValue(value) {
+  try {
+    return { value: JSON.parse(value) };
+  } catch {
+    return { error: 'invalid_json' };
+  }
+}
+
+function removeSensitiveSettings(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+
+  return Object.fromEntries(
+    Object.entries(value).filter(([key]) => !SENSITIVE_SETTING_KEYS.has(key))
+  );
+}
+
 export function SettingsModal({ isOpen, onClose, settings, onSaveSettings }) {
+  const { logout } = useAuth();
   const [activeTab, setActiveTab] = useState('ai');
   const [englishVoices, setEnglishVoices] = useState([]);
   const [localSettings, setLocalSettings] = useState(DEFAULT_SETTINGS);
+  const [backupStatus, setBackupStatus] = useState(null);
+  const [restoreReady, setRestoreReady] = useState(false);
+  const [migrationComplete, setMigrationComplete] = useState(false);
+  const [dataBusy, setDataBusy] = useState(false);
+  const restoreInputRef = useRef(null);
+  const migrationInputRef = useRef(null);
 
   useEffect(() => {
     if (isOpen && settings) {
@@ -65,6 +100,140 @@ export function SettingsModal({ isOpen, onClose, settings, onSaveSettings }) {
     );
   };
 
+  const downloadJson = (backup, prefix = 'minuslearn-backup') => {
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+
+      anchor.href = url;
+      anchor.download = `${prefix}-${(backup.exportedAt || new Date().toISOString()).replace(/[:.]/g, '-')}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  };
+
+  const handleBackup = async () => {
+    setDataBusy(true);
+    try {
+      const backup = await apiRequest('/api/backups/export');
+      downloadJson(backup);
+
+      setBackupStatus({
+        type: 'success',
+        message: `Đã tải backup MongoDB gồm ${Object.keys(backup.data || {}).length} nhóm dữ liệu.`,
+      });
+      setRestoreReady(false);
+      setMigrationComplete(false);
+    } catch (error) {
+      console.error('Không thể sao lưu dữ liệu MinusLearn:', error);
+      setBackupStatus({ type: 'error', message: 'Không thể tạo file backup từ MongoDB. Vui lòng thử lại.' });
+    } finally {
+      setDataBusy(false);
+    }
+  };
+
+  const handleRestoreFile = async event => {
+    const [file] = event.target.files || [];
+    event.target.value = '';
+    if (!file) return;
+
+    setDataBusy(true);
+    try {
+      const backup = JSON.parse(await file.text());
+      if (
+        backup?.format !== 'minuslearn-local-storage-backup'
+        || backup?.version !== BACKUP_VERSION
+        || !backup.data
+        || typeof backup.data !== 'object'
+        || Array.isArray(backup.data)
+      ) {
+        throw new Error('invalid_backup');
+      }
+      if (!window.confirm(`Khôi phục dữ liệu MongoDB từ "${file.name}"? Toàn bộ dữ liệu học trên tài khoản hiện tại sẽ được thay thế.`)) {
+        return;
+      }
+      const result = await apiRequest('/api/backups/restore?replace=true', { method: 'POST', body: backup });
+
+      setRestoreReady(true);
+      setMigrationComplete(false);
+      setBackupStatus({
+        type: 'success',
+        message: `Đã khôi phục dữ liệu MongoDB (${Object.values(result.counts || {}).reduce((sum, count) => sum + count, 0)} bản ghi). Tải lại trang để áp dụng.`,
+      });
+    } catch (error) {
+      console.error('Không thể khôi phục dữ liệu MinusLearn:', error);
+      setRestoreReady(false);
+      setBackupStatus({
+        type: 'error',
+        message: 'File backup không hợp lệ hoặc không thể khôi phục dữ liệu.',
+      });
+    } finally {
+      setDataBusy(false);
+    }
+  };
+
+  const handleMigrationFile = async event => {
+    const [file] = event.target.files || [];
+    event.target.value = '';
+    if (!file) return;
+
+    setDataBusy(true);
+    setMigrationComplete(false);
+    try {
+      const backup = JSON.parse(await file.text());
+      const preview = await apiRequest('/api/migrations/local-storage/preview', { method: 'POST', body: backup });
+      const total = Object.values(preview.counts || {}).reduce((sum, count) => sum + count, 0);
+      if (!window.confirm(`Nhập ${total} bản ghi từ "${file.name}" vào tài khoản MongoDB trống?`)) return;
+      const result = await apiRequest('/api/migrations/local-storage/import', { method: 'POST', body: backup });
+      setRestoreReady(true);
+      setMigrationComplete(true);
+      setBackupStatus({
+        type: 'success',
+        message: result.status === 'already_imported'
+          ? 'File backup này đã được nhập trước đó. Dữ liệu MongoDB vẫn nguyên vẹn.'
+          : `Đã nhập ${total} bản ghi LocalStorage vào MongoDB.`,
+      });
+    } catch (error) {
+      console.error('Không thể nhập LocalStorage vào MongoDB:', error);
+      setBackupStatus({ type: 'error', message: error.message || 'Không thể nhập file backup vào MongoDB.' });
+    } finally {
+      setDataBusy(false);
+    }
+  };
+
+  const handleLegacyBackup = () => {
+    const data = {};
+    const invalidKeys = [];
+    Object.keys(window.localStorage)
+      .filter(key => key.startsWith(STORAGE_PREFIX) && key !== 'minuslearn_device_credentials')
+      .sort()
+      .forEach(key => {
+        const parsed = parseStoredValue(window.localStorage.getItem(key));
+        if (parsed.error) invalidKeys.push(key);
+        else data[key] = key === 'minuslearn_settings' ? removeSensitiveSettings(parsed.value) : parsed.value;
+      });
+    const backup = {
+      format: 'minuslearn-local-storage-backup',
+      version: BACKUP_VERSION,
+      exportedAt: new Date().toISOString(),
+      data,
+      metadata: { source: 'localStorage', entryCount: Object.keys(data).length, invalidKeys },
+    };
+    downloadJson(backup, 'minuslearn-localstorage-backup');
+    setBackupStatus({ type: 'success', message: `Đã tải ${Object.keys(data).length} nhóm dữ liệu LocalStorage cũ.` });
+  };
+
+  const handleClearLegacyData = () => {
+    const keys = Object.keys(window.localStorage)
+      .filter(key => key.startsWith(STORAGE_PREFIX) && key !== 'minuslearn_device_credentials');
+    if (!window.confirm(`Xóa ${keys.length} mục LocalStorage cũ? File backup và dữ liệu MongoDB sẽ không bị ảnh hưởng.`)) return;
+    saveDeviceCredentials(localSettings);
+    keys.forEach(key => window.localStorage.removeItem(key));
+    setMigrationComplete(false);
+    setBackupStatus({ type: 'success', message: 'Đã xóa dữ liệu LocalStorage cũ. API key theo thiết bị vẫn được giữ lại.' });
+  };
+
   return (
     <div className="fixed inset-0 bg-black/50 z-[100] flex justify-center items-center p-4 backdrop-blur-sm">
       <div className="bg-canvas w-full max-w-3xl h-[80vh] md:h-[600px] rounded-[16px] shadow-lg flex flex-col md:flex-row overflow-hidden animate-in fade-in zoom-in-95 duration-200">
@@ -98,6 +267,23 @@ export function SettingsModal({ isOpen, onClose, settings, onSaveSettings }) {
           >
             <Volume2 size={18} />
             <span className="font-body-md text-sm">Giọng đọc</span>
+          </button>
+
+          <button
+            className={`flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${activeTab === 'data' ? 'bg-primary/10 text-primary font-medium' : 'text-on-surface-variant hover:bg-surface-container-low'}`}
+            onClick={() => setActiveTab('data')}
+          >
+            <DatabaseBackup size={18} />
+            <span className="font-body-md text-sm">Dữ liệu</span>
+          </button>
+
+          <div className="mt-auto pt-4 hidden md:block" />
+          <button
+            className="flex items-center gap-3 px-3 py-2 mt-4 md:mt-0 rounded-lg text-left text-error hover:bg-error/10 transition-colors"
+            onClick={async () => { await logout(); onClose(); }}
+          >
+            <LogOut size={18} />
+            <span className="font-body-md text-sm">Đăng xuất</span>
           </button>
         </div>
 
@@ -311,6 +497,127 @@ export function SettingsModal({ isOpen, onClose, settings, onSaveSettings }) {
                     </div>
                   )}
                 </div>
+              </div>
+            )}
+
+            {activeTab === 'data' && (
+              <div className="max-w-xl flex flex-col gap-8">
+                <div>
+                  <h3 className="text-heading-3 font-heading-3 text-on-surface mb-2">Sao lưu dữ liệu</h3>
+                  <p className="text-body-sm text-on-surface-variant">
+                    Sao lưu, khôi phục dữ liệu MongoDB hoặc nhập file backup LocalStorage cũ vào tài khoản này.
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-outline-variant bg-surface p-4 flex flex-col gap-3">
+                  <p className="text-body-sm text-on-surface-variant">
+                    File backup bao gồm từ vựng, chủ đề, tiến độ, lỗi luyện tập, dữ liệu viết và lịch sử thi. Các API key của bạn sẽ không được đưa vào file.
+                  </p>
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={handleBackup}
+                      disabled={dataBusy}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-on-primary rounded-full font-button text-sm hover:bg-primary-active transition-colors shadow-sm disabled:opacity-50"
+                    >
+                      <Download size={16} />
+                      Backup MongoDB
+                    </button>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-outline-variant bg-surface p-4 flex flex-col gap-3">
+                  <div>
+                    <h4 className="text-body-md font-semibold text-on-surface">Khôi phục từ backup</h4>
+                    <p className="text-body-sm text-on-surface-variant mt-1">
+                      Chọn file JSON đã tải từ MinusLearn. Toàn bộ dữ liệu MongoDB của tài khoản hiện tại sẽ bị thay thế sau khi xác nhận.
+                    </p>
+                  </div>
+                  <input
+                    ref={restoreInputRef}
+                    type="file"
+                    accept="application/json,.json"
+                    className="hidden"
+                    onChange={handleRestoreFile}
+                  />
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => restoreInputRef.current?.click()}
+                      disabled={dataBusy}
+                      className="inline-flex items-center gap-2 px-4 py-2 border border-primary text-primary rounded-full font-button text-sm hover:bg-primary/10 transition-colors disabled:opacity-50"
+                    >
+                      <Upload size={16} />
+                      Chọn file để khôi phục
+                    </button>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-outline-variant bg-surface p-4 flex flex-col gap-3">
+                  <div>
+                    <h4 className="text-body-md font-semibold text-on-surface">Nhập LocalStorage vào MongoDB</h4>
+                    <p className="text-body-sm text-on-surface-variant mt-1">
+                      Chỉ dùng cho tài khoản chưa có dữ liệu học. File được kiểm tra và nhập một lần, không bao gồm API key.
+                    </p>
+                  </div>
+                  <input
+                    ref={migrationInputRef}
+                    type="file"
+                    accept="application/json,.json"
+                    className="hidden"
+                    onChange={handleMigrationFile}
+                  />
+                  <div className="flex flex-wrap justify-end gap-sm">
+                    <button
+                      type="button"
+                      onClick={handleLegacyBackup}
+                      disabled={dataBusy}
+                      className="inline-flex items-center gap-2 px-4 py-2 border border-outline-variant text-on-surface rounded-full font-button text-sm hover:bg-canvas-soft transition-colors disabled:opacity-50"
+                    >
+                      <Download size={16} />
+                      Xuất LocalStorage cũ
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => migrationInputRef.current?.click()}
+                      disabled={dataBusy}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-primary text-on-primary rounded-full font-button text-sm hover:bg-primary-active transition-colors disabled:opacity-50"
+                    >
+                      <Upload size={16} />
+                      Nhập vào MongoDB
+                    </button>
+                  </div>
+                </div>
+
+                {backupStatus && (
+                  <div className={`rounded-xl border p-4 text-body-sm ${backupStatus.type === 'error'
+                    ? 'border-error/30 bg-error/10 text-on-error-container'
+                    : backupStatus.type === 'warning'
+                      ? 'border-accent-orange/30 bg-accent-orange/10 text-on-surface'
+                      : 'border-accent-green/30 bg-accent-green/10 text-on-surface'
+                    }`}>
+                    {backupStatus.message}
+                    {restoreReady && (
+                      <button
+                        type="button"
+                        onClick={() => window.location.reload()}
+                        className="mt-3 block rounded-full border border-current px-3 py-1 font-button text-sm hover:bg-black/5"
+                      >
+                        Tải lại ngay
+                      </button>
+                    )}
+                    {migrationComplete && (
+                      <button
+                        type="button"
+                        onClick={handleClearLegacyData}
+                        className="mt-2 block rounded-full border border-current px-3 py-1 font-button text-sm hover:bg-black/5"
+                      >
+                        Xóa LocalStorage cũ
+                      </button>
+                    )}
+                  </div>
+                )}
+
               </div>
             )}
           </div>

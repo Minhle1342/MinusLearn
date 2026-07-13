@@ -18,7 +18,7 @@ import {
   FALLBACK_SIMILARITY_THRESHOLD,
   hasSpeechRecognitionSupport,
 } from '../../services/speechAssessment';
-import { useLocalStorage } from '../../hooks/useLocalStorage';
+import { useRemoteStorage } from '../../hooks/useRemoteStorage';
 import { speakEnglishText, getEnglishVoices, getSelectedEnglishVoice } from '../../utils/speech';
 import { generateSpeakingScenario, chatWithNPC, evaluateSpeakingPractice } from '../../services/api';
 
@@ -73,7 +73,7 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
   const [sessionResults, setSessionResults] = useState([]);
   const [errorMessage, setErrorMessage] = useState('');
   const sessionRef = useRef(null);
-  const [speakingMistakes, setSpeakingMistakes] = useLocalStorage('minuslearn_speaking_mistakes', {});
+  const [speakingMistakes, setSpeakingMistakes] = useRemoteStorage('minuslearn_speaking_mistakes', {});
 
   // AI mode states
   const [aiChatHistory, setAiChatHistory] = useState([]);

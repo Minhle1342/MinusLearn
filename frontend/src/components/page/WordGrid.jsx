@@ -1,11 +1,11 @@
 import React from 'react';
 import { WordCard } from './WordCard';
 import { BookOpen, Plus } from 'lucide-react';
-import { useLocalStorage } from '../../hooks/useLocalStorage';
+import { useRemoteStorage } from '../../hooks/useRemoteStorage';
 
 export function WordGrid({ words, activeTopicId, onAddWord, onEditWord, searchTerm, viewMode, settings, mistakeFilter }) {
-  const [listeningMistakes] = useLocalStorage('minuslearn_mistakes', {});
-  const [readingMistakes] = useLocalStorage('minuslearn_reading_mistakes', {});
+  const [listeningMistakes] = useRemoteStorage('minuslearn_mistakes', {});
+  const [readingMistakes] = useRemoteStorage('minuslearn_reading_mistakes', {});
 
   const filteredWords = words.filter(w => {
     if (w.topicId !== activeTopicId) return false;

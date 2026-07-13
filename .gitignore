@@ -14,6 +14,9 @@
 # Dependencies
 node_modules/
 frontend/node_modules/
+.venv/
+__pycache__/
+*.py[cod]
 
 # Build outputs
 dist/
@@ -33,3 +36,13 @@ pnpm-debug.log*
 Thumbs.db
 .idea/
 .vscode/
+
+# Databases
+*.sqlite3
+*.sqlite
+*.db
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/

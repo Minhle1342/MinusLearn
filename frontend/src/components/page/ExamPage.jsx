@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   CheckCircle2, XCircle, Volume2, Mic, Square, RotateCcw,
-  ClipboardCheck, Headphones, BookOpen, MessageSquare, Loader2, ChevronRight, Lightbulb,
-  PenLine, Clock3, FileText, AlertTriangle
+  ClipboardCheck, Headphones, BookOpen, MessageSquare, Loader2, ChevronRight, ChevronLeft, Lightbulb,
+  PenLine, Clock3, FileText, AlertTriangle, Trophy
 } from 'lucide-react';
 import {
   evaluateExamWritingSubmission,
@@ -16,8 +16,9 @@ import {
   hasSpeechRecognitionSupport,
 } from '../../services/speechAssessment';
 import { WritingVisual } from './WritingVisual';
+import { saveExamResult, getExamLeaderboard, incrementReviewCount } from '../../services/examHistoryService';
+import { deleteExamWritingDraft, getExamWritingDraft, saveExamWritingDraft } from '../../services/examDraftService';
 import {
-  EXAM_WRITING_DRAFT_KEY,
   EXAM_WRITING_TASK1_SECONDS,
   EXAM_WRITING_TASKS,
   EXAM_WRITING_TOTAL_SECONDS,
@@ -53,6 +54,13 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
   const [phase, setPhase] = useState('setup'); // setup | loading | listening | speaking | reading | results
   const [examData, setExamData] = useState(null);
   const [error, setError] = useState('');
+  const [leaderboard, setLeaderboard] = useState([]);
+  const [retakeRecordId, setRetakeRecordId] = useState(null);
+  const [hasPlayedDialogue, setHasPlayedDialogue] = useState(false);
+  const [showSetupLeaderboard, setShowSetupLeaderboard] = useState(false);
+  const [setupLeaderboard, setSetupLeaderboard] = useState([]);
+  const [setupLeaderboardTab, setSetupLeaderboardTab] = useState('Dễ');
+  const hasSavedResult = useRef(false);
 
   // ── Setup state ──
   const [difficulty, setDifficulty] = useState('Trung bình'); // Dễ, Trung bình, Khó
@@ -128,10 +136,9 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
 
   // ── Restore an interrupted Writing phase ──
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(EXAM_WRITING_DRAFT_KEY);
-      if (!raw) return;
-      const draft = JSON.parse(raw);
+    let cancelled = false;
+    getExamWritingDraft().then(draft => {
+      if (!draft || cancelled) return;
       if (!draft?.examData?.writing?.tasks || !Array.isArray(draft.writingAnswers)) return;
 
       setExamData(draft.examData);
@@ -149,10 +156,20 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
       setIsWritingLocked(Boolean(draft.isWritingLocked) || (draft.writingTimeLeft || 0) <= 0);
       setWritingSubmitError('');
       setPhase('writing');
-    } catch {
-      localStorage.removeItem(EXAM_WRITING_DRAFT_KEY);
-    }
+    }).catch(error => {
+      console.error('Không thể tải draft bài thi:', error);
+      deleteExamWritingDraft().catch(() => {});
+    });
+    return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getExamLeaderboard(setupLeaderboardTab, activeTopicId)
+      .then(items => { if (!cancelled) setSetupLeaderboard(items); })
+      .catch(error => console.error('Không thể tải bảng xếp hạng:', error));
+    return () => { cancelled = true; };
+  }, [setupLeaderboardTab, activeTopicId]);
 
   // ── Writing timer ──
   useEffect(() => {
@@ -207,7 +224,8 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
     if (phase !== 'writing') return undefined;
     const persistDraft = () => {
       if (writingDraftRef.current) {
-        localStorage.setItem(EXAM_WRITING_DRAFT_KEY, JSON.stringify(writingDraftRef.current));
+        saveExamWritingDraft(writingDraftRef.current)
+          .catch(error => console.error('Không thể autosave draft bài thi:', error));
       }
     };
     persistDraft();
@@ -226,6 +244,9 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
     }
     setPhase('loading');
     setError('');
+    hasSavedResult.current = false;
+    setRetakeRecordId(null);
+    setHasPlayedDialogue(false);
 
     try {
       const examWords = selectedWords.map(w => ({ word: w.word, meaning: w.meaning, example: w.example }));
@@ -241,7 +262,7 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
       ]);
       const data = writingData ? { ...baseExamData, writing: writingData } : baseExamData;
       setExamData(data);
-      localStorage.removeItem(EXAM_WRITING_DRAFT_KEY);
+      deleteExamWritingDraft().catch(error => console.error('Không thể xóa draft bài thi:', error));
 
       // Build speaker→voice map for both listening and speaking sections
       const voices = getEnglishVoices();
@@ -292,6 +313,69 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
     }
   };
 
+  const handleRetakeExam = (record) => {
+    if (!record.examData) {
+      setError('Bài kiểm tra này là dữ liệu cũ, không thể làm lại vì không có đề thi chi tiết.');
+      return;
+    }
+    
+    incrementReviewCount(record.id).catch(error => console.error('Không thể tăng lượt ôn:', error));
+    
+    setHasPlayedDialogue(false);
+    setListeningStep('dialogue');
+    setCurrentDialogueLine(0);
+    setListeningAnswers([]);
+    setListeningSelectedOption(null);
+    setCurrentListeningQ(0);
+    setShowDialogue(false);
+    
+    setCurrentSpeakingLine(0);
+    setSpeakingResults([]);
+    setLiveTranscript('');
+    setSpeakingResult(null);
+    
+    setCurrentReadingQ(0);
+    setReadingAnswers([]);
+    setReadingSelectedOption(null);
+    setReadingInputValue('');
+    setReadingInputSubmitted(false);
+    setReadingInputIsCorrect(false);
+    setShowReadingHint(false);
+    
+    setWritingTaskIndex(0);
+    setWritingAnswers(['', '']);
+    setWritingEvaluation(null);
+    setWritingTimeLeft(EXAM_WRITING_TOTAL_SECONDS);
+    setIsWritingLocked(false);
+    setWritingSubmitError('');
+    setIsEvaluatingWriting(false);
+
+    setRetakeRecordId(record.id);
+    setExamData(record.examData);
+    setDifficulty(record.difficulty);
+    hasSavedResult.current = false;
+      deleteExamWritingDraft().catch(error => console.error('Không thể xóa draft bài thi:', error));
+    
+    const voices = getEnglishVoices();
+    const listeningSpeakers = (record.examData.listening?.dialogue || []).map(d => d.speaker);
+    const speakingSpeakers = (record.examData.speaking?.dialogue || [])
+      .filter(d => !d.isUserTurn)
+      .map(d => d.speaker);
+    
+    const npcSpeakers = [...new Set([...listeningSpeakers, ...speakingSpeakers])];
+    const shuffledVoices = [...voices].sort(() => 0.5 - Math.random());
+    const map = {};
+    npcSpeakers.forEach((speaker, i) => {
+      if (shuffledVoices.length > 0) {
+        map[speaker] = shuffledVoices[i % shuffledVoices.length].voiceURI;
+      }
+    });
+    setSpeakerVoiceMap(map);
+    
+    setPhase('listening');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   // ═══════════════════════════════════════
   //  LISTENING PHASE
   // ═══════════════════════════════════════
@@ -318,6 +402,7 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
   const handlePlayDialogue = async (slow = false) => {
     if (!examData?.listening?.dialogue || isPlaying) return;
     setIsPlaying(true);
+    setHasPlayedDialogue(true);
     const rate = slow ? 0.6 : 0.9;
 
     for (let i = 0; i < examData.listening.dialogue.length; i++) {
@@ -338,6 +423,8 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
     const newAnswers = [...listeningAnswers, { question: q.question, isCorrect, selected: optionIndex }];
     setListeningAnswers(newAnswers);
 
+    const delay = isCorrect ? 3500 : 1500;
+
     setTimeout(() => {
       setListeningSelectedOption(null);
       if (currentListeningQ + 1 < examData.listening.questions.length) {
@@ -353,7 +440,7 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
           }, 500);
         }
       }
-    }, 1500);
+    }, delay);
   };
 
   // ═══════════════════════════════════════
@@ -533,7 +620,7 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
         settings.model
       );
       setWritingEvaluation(result);
-      localStorage.removeItem(EXAM_WRITING_DRAFT_KEY);
+      deleteExamWritingDraft().catch(error => console.error('Không thể xóa draft bài thi:', error));
       setPhase('results');
     } catch (err) {
       setWritingSubmitError(err.message || 'Không thể chấm bài Writing. Vui lòng thử lại.');
@@ -560,6 +647,31 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
 
   const totalScore = Math.round((listeningScore + speakingScore + readingScore) / 3);
 
+  useEffect(() => {
+    if (phase === 'results' && !hasSavedResult.current) {
+      hasSavedResult.current = true;
+
+      const persistResult = async () => {
+        if (!retakeRecordId) {
+          await saveExamResult({
+            difficulty,
+            totalScore,
+            listeningScore,
+            speakingScore,
+            readingScore,
+            writingBand: writingEvaluation?.overallWritingBand || null,
+            examData,
+            topicId: activeTopicId,
+          });
+        }
+        const items = await getExamLeaderboard(difficulty, activeTopicId);
+        setLeaderboard(items);
+        if (difficulty === setupLeaderboardTab) setSetupLeaderboard(items);
+      };
+      persistResult().catch(error => console.error('Không thể lưu kết quả bài thi:', error));
+    }
+  }, [phase, difficulty, totalScore, listeningScore, speakingScore, readingScore, writingEvaluation, retakeRecordId, examData, activeTopicId, setupLeaderboardTab]);
+
   // ═══════════════════════════════════════
   //  RENDER
   // ═══════════════════════════════════════
@@ -567,8 +679,8 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
   // ── SETUP ──
   if (phase === 'setup') {
     return (
-      <div className="min-h-full flex items-center justify-center p-xl">
-        <div className="bg-surface border border-hairline rounded-[16px] p-[40px] shadow-sm max-w-2xl w-full flex flex-col items-center text-center">
+      <div className="min-h-full flex items-stretch p-lg md:p-xl gap-xl transition-all duration-300 relative">
+        <div className={`bg-surface border border-hairline rounded-[16px] p-[40px] shadow-sm flex flex-col items-center text-center transition-all duration-300 ${showSetupLeaderboard ? 'w-2/3' : 'max-w-2xl mx-auto w-full'}`}>
           <div className="w-24 h-24 mb-md mx-auto rounded-full bg-surface-container-low flex items-center justify-center">
             <ClipboardCheck size={48} className="text-primary" />
           </div>
@@ -661,6 +773,89 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
             Bắt đầu kiểm tra
           </button>
         </div>
+
+        {/* Leaderboard Panel */}
+        <div className={`transition-all duration-300 flex ${showSetupLeaderboard ? 'w-1/3 opacity-100' : 'w-0 opacity-0 overflow-hidden'}`}>
+          <div className="bg-surface border border-hairline rounded-[16px] p-[24px] shadow-sm w-full flex flex-col relative h-full min-w-[300px]">
+            <h3 className="font-heading-2 text-heading-2 text-ink mb-md">Bảng xếp hạng</h3>
+            
+            <div className="flex bg-canvas-soft border border-hairline rounded-[8px] overflow-hidden mb-lg">
+              {['Dễ', 'Trung bình', 'Khó'].map(level => (
+                <button
+                  key={level}
+                  onClick={() => setSetupLeaderboardTab(level)}
+                  className={`flex-1 py-sm text-center font-button text-[12px] transition-colors ${
+                    setupLeaderboardTab === level
+                      ? 'bg-primary text-on-primary'
+                      : 'text-ink hover:bg-surface-container-low'
+                  }`}
+                >
+                  {level}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex-1 overflow-y-auto pr-sm -mr-sm space-y-md">
+              {setupLeaderboard.length === 0 ? (
+                <div className="text-center py-xl text-ink-muted">
+                  <Trophy size={48} className="mx-auto mb-md opacity-20" />
+                  <p className="font-body-sm">Chưa có kết quả ở mức độ này</p>
+                </div>
+              ) : (
+                setupLeaderboard.map((record, idx) => (
+                  <div key={record.id} className="p-md rounded-[12px] border border-hairline bg-surface flex justify-between items-center gap-md">
+                    <div className="flex items-center gap-md min-w-0">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold flex-shrink-0 ${
+                        idx === 0 ? 'bg-accent-orange text-surface' :
+                        idx === 1 ? 'bg-surface-container-high text-ink' :
+                        idx === 2 ? 'bg-accent-orange/20 text-accent-orange' :
+                        'bg-canvas-soft text-ink-muted'
+                      }`}>
+                        {idx + 1}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="font-button text-button text-ink truncate mb-[2px]">
+                          {new Date(record.timestamp).toLocaleDateString('vi-VN')}
+                        </div>
+                        <div className="font-body-sm text-[11px] text-ink-muted">
+                          Nghe: {record.listeningScore}% · Nói: {record.speakingScore}%
+                        </div>
+                        {(record.reviewCount > 0) && (
+                          <div className="mt-xs text-[10px] font-button text-primary bg-primary/10 inline-block px-sm py-[2px] rounded-full">
+                            Đã ôn {record.reviewCount} lần
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-sm">
+                      <div className={`font-display-2 text-xl ${idx === 0 ? 'text-accent-orange' : 'text-primary'}`}>
+                        {record.totalScore}%
+                      </div>
+                      {record.examData && (
+                        <button
+                          onClick={() => handleRetakeExam(record)}
+                          className="p-xs bg-surface border border-hairline rounded-[6px] hover:bg-canvas-soft text-ink-muted hover:text-primary transition-colors flex items-center justify-center"
+                          title="Làm lại đề này"
+                        >
+                          <RotateCcw size={14} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Toggle Button */}
+        <button
+          onClick={() => setShowSetupLeaderboard(!showSetupLeaderboard)}
+          className="fixed right-0 top-1/2 -translate-y-1/2 bg-surface border border-r-0 border-hairline shadow-lg p-sm rounded-l-[12px] hover:bg-canvas-soft transition-colors z-10 text-primary"
+          title={showSetupLeaderboard ? "Đóng Bảng xếp hạng" : "Mở Bảng xếp hạng"}
+        >
+          {showSetupLeaderboard ? <ChevronRight size={24} /> : <ChevronLeft size={24} />}
+        </button>
       </div>
     );
   }
@@ -774,7 +969,7 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
                 </button>
                 <button
                   onClick={() => setListeningStep('questions')}
-                  disabled={isPlaying}
+                  disabled={isPlaying || !hasPlayedDialogue}
                   className="flex-1 bg-accent-green text-surface font-button text-button py-md rounded-full shadow-md hover:bg-accent-green/90 transition-all disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-xs"
                 >
                   Trả lời câu hỏi <ChevronRight size={18} />
@@ -783,7 +978,18 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
             </>
           ) : (
             <>
-              <h3 className="font-heading-2 text-heading-2 text-ink mb-md">Câu hỏi kiểm tra nghe</h3>
+              <div className="flex items-center justify-between mb-md">
+                <h3 className="font-heading-2 text-heading-2 text-ink">Câu hỏi kiểm tra nghe</h3>
+                {(difficulty === 'Dễ' || difficulty === 'Trung bình') && (
+                  <button
+                    onClick={() => handlePlayDialogue(false)}
+                    disabled={isPlaying}
+                    className="bg-surface-container-high text-on-surface font-button text-button py-sm px-md rounded-full shadow-sm hover:bg-surface-container-highest transition-all disabled:opacity-50 disabled:pointer-events-none flex items-center gap-xs text-sm"
+                  >
+                    <Volume2 size={16} /> {isPlaying ? 'Đang phát...' : 'Nghe lại hội thoại'}
+                  </button>
+                )}
+              </div>
               <div className="flex justify-between font-eyebrow text-eyebrow text-ink-muted uppercase mb-sm">
                 <span>Câu hỏi</span>
                 <span>{currentListeningQ + 1} / {examData.listening.questions.length}</span>
@@ -834,6 +1040,12 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
                   );
                 })}
               </div>
+
+              {listeningSelectedOption !== null && listeningSelectedOption === examData.listening.questions[currentListeningQ].correctIndex && examData.listening.questions[currentListeningQ].questionTranslation && (
+                <div className="mt-md p-md bg-accent-green/10 border border-accent-green rounded-[12px] text-accent-green animate-in fade-in slide-in-from-bottom-2 text-left">
+                  <strong className="font-bold">Dịch nghĩa ngữ cảnh:</strong> {examData.listening.questions[currentListeningQ].questionTranslation}
+                </div>
+              )}
             </>
           )}
         </div>
@@ -1465,10 +1677,68 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
           </div>
         )}
 
+        {leaderboard.length > 0 && (
+          <div className="mb-xxl rounded-[16px] border border-hairline bg-canvas-soft p-lg text-left">
+            <div className="mb-lg flex items-center gap-sm">
+              <Trophy size={22} className="text-accent-orange" />
+              <div>
+                <h3 className="font-heading-2 text-heading-2 text-ink">Bảng xếp hạng điểm cao</h3>
+                <p className="font-body-sm text-body-sm text-ink-muted">
+                  Mức độ: {difficulty}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-sm">
+              {leaderboard.map((record, idx) => (
+                <div key={record.id} className={`flex items-center justify-between p-md rounded-[12px] border ${idx === 0 ? 'bg-accent-orange/10 border-accent-orange/20' : 'bg-surface border-hairline'}`}>
+                  <div className="flex items-center gap-md">
+                    <span className={`font-display-2 w-8 text-center ${idx === 0 ? 'text-accent-orange' : 'text-ink-muted'}`}>
+                      #{idx + 1}
+                    </span>
+                    <div>
+                      <div className="font-title text-title text-ink">
+                        {new Date(record.timestamp).toLocaleString('vi-VN', { 
+                          hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' 
+                        })}
+                      </div>
+                      <div className="font-body-sm text-body-sm text-ink-muted">
+                        Nghe: {record.listeningScore}% · Nói: {record.speakingScore}% · Đọc: {record.readingScore}%
+                        {record.writingBand ? ` · Viết: ${record.writingBand}` : ''}
+                      </div>
+                      {(record.reviewCount > 0) && (
+                        <div className="mt-xs text-xs font-button text-primary bg-primary/10 inline-block px-sm py-[2px] rounded-full">
+                          Đã ôn {record.reviewCount} lần
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-md">
+                    <div className={`font-display-2 text-display-2 ${idx === 0 ? 'text-accent-orange' : 'text-primary'}`}>
+                      {record.totalScore}%
+                    </div>
+                    {record.examData && (
+                      <button
+                        onClick={() => handleRetakeExam(record)}
+                        className="p-sm bg-surface border border-hairline rounded-[8px] hover:bg-canvas-soft text-ink-muted hover:text-primary transition-colors flex flex-col items-center gap-[2px]"
+                        title="Làm lại đề này"
+                      >
+                        <RotateCcw size={16} />
+                        <span className="text-[10px] uppercase font-bold">Làm lại</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="flex justify-center">
           <button
             onClick={() => {
-              localStorage.removeItem(EXAM_WRITING_DRAFT_KEY);
+      deleteExamWritingDraft().catch(error => console.error('Không thể xóa draft bài thi:', error));
+              setRetakeRecordId(null);
               setPhase('setup');
             }}
             className="bg-primary text-on-primary rounded-full py-md px-xxl font-button text-button hover:bg-primary-active transition-all shadow-sm flex items-center gap-xs"
