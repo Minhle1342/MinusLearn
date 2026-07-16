@@ -16,7 +16,9 @@ const STUDY_FIELDS = {
 
 async function loadValue(key) {
   if (key === 'minuslearn_topics') return apiRequest('/api/topics');
+  if (key === 'minuslearn_video_topics') return apiRequest('/api/video-topics');
   if (key === 'minuslearn_words') return apiRequest('/api/words');
+  if (key === 'minuslearn_videos') return apiRequest('/api/videos');
   if (key === 'minuslearn_settings') {
     const result = await apiRequest('/api/settings');
     return { ...result.settings, ...getDeviceCredentials() };
@@ -34,7 +36,9 @@ async function loadValue(key) {
 
 async function persistValue(key, value) {
   if (key === 'minuslearn_topics') return apiRequest('/api/topics', { method: 'PUT', body: value });
+  if (key === 'minuslearn_video_topics') return apiRequest('/api/video-topics', { method: 'PUT', body: value });
   if (key === 'minuslearn_words') return apiRequest('/api/words', { method: 'PUT', body: value });
+  if (key === 'minuslearn_videos') return apiRequest('/api/videos', { method: 'PUT', body: value });
   if (key === 'minuslearn_settings') {
     saveDeviceCredentials(value);
     return apiRequest('/api/settings', { method: 'PUT', body: { settings: sanitizeRemoteSettings(value) } });
@@ -98,7 +102,10 @@ export function useRemoteStorage(key, initialValue) {
           setStoredValue(previousValue);
         }
         setError(requestError);
+        throw requestError;
       });
+
+    return writeQueueRef.current;
   }, [key]);
 
   return [storedValue, setValue, { loading, error }];

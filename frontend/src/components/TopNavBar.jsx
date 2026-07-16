@@ -10,6 +10,7 @@ export function TopNavBar({ wordCount, activePage, setActivePage, onOpenDrawer, 
     { id: 'writing', label: 'Luyện viết' },
     { id: 'exam', label: 'Kiểm tra' },
     { id: 'review', label: 'Ôn ngắt quãng' },
+    { id: 'bilingual-video', label: 'Video Song ngữ' },
   ];
 
   return (

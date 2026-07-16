@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .database import create_client, create_indexes
-from .routers import auth, backups, data
+from .routers import auth, backups, data, video
 
 
 @asynccontextmanager
@@ -40,6 +40,7 @@ app.mount("/uploadImage", StaticFiles(directory="uploadImage"), name="uploadImag
 app.include_router(auth.router)
 app.include_router(data.router)
 app.include_router(backups.router)
+app.include_router(video.router)
 
 @app.get("/api/health")
 async def health():

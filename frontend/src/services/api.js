@@ -834,3 +834,25 @@ Evaluate this essay now.`;
     generationConfig: { temperature: 0.2 },
   });
 }
+
+export async function translateTranscriptChunks(chunksText, apiKey, model) {
+  const systemInstruction = `You are a professional English-Vietnamese translator.
+Translate the following video transcript chunks from English to Vietnamese.
+The input will be a JSON array of objects with "text" (English).
+You must return a JSON array of strings, where each string is the Vietnamese translation corresponding to the input chunk in the exact same order.
+Make the translation sound natural in the context of a video transcript.
+Return ONLY a JSON array of strings.`;
+
+  const prompt = `Translate these chunks:
+${chunksText}`;
+
+  const result = await callGeminiJson({
+    apiKey,
+    model,
+    systemInstruction,
+    prompt,
+    generationConfig: { temperature: 0.3 },
+  });
+
+  return result;
+}

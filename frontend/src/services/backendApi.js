@@ -19,7 +19,9 @@ export function setAccessToken(token) {
 async function parseResponse(response) {
   if (response.status === 204) return null;
   const contentType = response.headers.get('content-type') || '';
-  return contentType.includes('application/json') ? response.json() : response.text();
+  if (contentType.includes('application/json')) return response.json();
+  if (contentType.startsWith('audio/')) return response.blob();
+  return response.text();
 }
 
 async function rawRequest(path, options = {}) {
@@ -105,4 +107,3 @@ export async function downloadExternalImage(url) {
 }
 
 export { API_BASE_URL };
-

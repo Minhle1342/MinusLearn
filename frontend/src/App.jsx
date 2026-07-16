@@ -16,12 +16,18 @@ import { SpacedReview } from './components/page/SpacedReview';
 import { SpeakingPractice } from './components/page/SpeakingPractice';
 import { WritingPractice } from './components/page/WritingPractice';
 import { ExamPage } from './components/page/ExamPage';
+import { BilingualVideo } from './components/page/BilingualVideo';
+import { VideoDetail } from './components/page/VideoDetail';
 
 function LearningApp() {
   const [topics, setTopics, topicsMeta] = useRemoteStorage('minuslearn_topics', [
     { id: 'default', name: 'General', colorClass: 'bg-accent-sky' }
   ]);
+  const [videoTopics, setVideoTopics] = useRemoteStorage('minuslearn_video_topics', [
+    { id: 'default-video', name: 'General Video', colorClass: 'bg-accent-sky' }
+  ]);
   const [words, setWords] = useRemoteStorage('minuslearn_words', []);
+  const [videos, setVideos] = useRemoteStorage('minuslearn_videos', []);
   const [settings, setSettings] = useRemoteStorage('minuslearn_settings', {
     apiKey: GEMINI_DEFAULT_KEY,
     model: GEMINI_DEFAULT_MODEL,
@@ -38,6 +44,7 @@ function LearningApp() {
 
   const [activeTopicId, setActiveTopicId] = useState('default');
   const [activePage, setActivePage] = useState('vocabulary');
+  const [activeVideoId, setActiveVideoId] = useState(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [mistakeFilter, setMistakeFilter] = useState('none');
@@ -166,18 +173,20 @@ function LearningApp() {
       />
 
       <div className="flex flex-1 overflow-hidden relative">
-        <Sidebar
-          isDrawerOpen={isDrawerOpen}
-          setIsDrawerOpen={setIsDrawerOpen}
-          topics={topics}
-          activeTopicId={activeTopicId}
-          setActiveTopicId={setActiveTopicId}
-          onAddTopic={() => { setTopicToEdit(null); setIsTopicModalOpen(true); }}
-          onEditTopic={id => { setTopicToEdit(topics.find(topic => topic.id === id)); setIsTopicModalOpen(true); }}
-          onDeleteTopic={handleDeleteTopic}
-          words={words}
-          srData={srData}
-        />
+        {activePage !== 'bilingual-video' && activePage !== 'video-detail' && (
+          <Sidebar
+            isDrawerOpen={isDrawerOpen}
+            setIsDrawerOpen={setIsDrawerOpen}
+            topics={topics}
+            activeTopicId={activeTopicId}
+            setActiveTopicId={setActiveTopicId}
+            onAddTopic={() => { setTopicToEdit(null); setIsTopicModalOpen(true); }}
+            onEditTopic={id => { setTopicToEdit(topics.find(topic => topic.id === id)); setIsTopicModalOpen(true); }}
+            onDeleteTopic={handleDeleteTopic}
+            words={words}
+            srData={srData}
+          />
+        )}
 
         <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-canvas">
           {activePage === 'vocabulary' ? (
@@ -314,6 +323,33 @@ function LearningApp() {
                 srData={srData}
                 setSrData={setSrData}
                 settings={settings}
+              />
+            </div>
+          ) : activePage === 'bilingual-video' ? (
+            <div className="flex-1 overflow-y-auto bg-canvas-soft">
+              <BilingualVideo
+                videos={videos}
+                setVideos={setVideos}
+                topics={videoTopics}
+                setTopics={setVideoTopics}
+                settings={settings}
+                onVideoSelect={(videoId) => {
+                  setActiveVideoId(videoId);
+                  setActivePage('video-detail');
+                }}
+              />
+            </div>
+          ) : activePage === 'video-detail' ? (
+            <div className="flex-1 overflow-y-auto bg-canvas-soft">
+              <VideoDetail
+                videoId={activeVideoId}
+                videos={videos}
+                setVideos={setVideos}
+                settings={settings}
+                onBack={() => {
+                  setActiveVideoId(null);
+                  setActivePage('bilingual-video');
+                }}
               />
             </div>
           ) : null}

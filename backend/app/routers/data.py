@@ -61,6 +61,17 @@ async def put_topics(payload: list[dict] = Body(...), user=Depends(get_current_u
     return await replace_resource("topics", payload, user, database)
 
 
+@router.get("/video-topics")
+async def get_video_topics(user=Depends(get_current_user), database=Depends(get_database)):
+    topics = await list_documents(database, "video_topics", user_id(user))
+    return topics or [{"id": "default-video", "name": "General Video", "colorClass": "bg-accent-sky"}]
+
+
+@router.put("/video-topics")
+async def put_video_topics(payload: list[dict] = Body(...), user=Depends(get_current_user), database=Depends(get_database)):
+    return await replace_resource("video_topics", payload, user, database)
+
+
 @router.post("/topics", status_code=201)
 async def create_topic(payload: dict = Body(...), user=Depends(get_current_user), database=Depends(get_database)):
     return await upsert_document(database, "topics", user_id(user), payload)

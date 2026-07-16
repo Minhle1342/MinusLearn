@@ -1,0 +1,886 @@
+import React, { useState, useRef, useEffect } from 'react';
+import ReactPlayer from 'react-player';
+import { translateTranscriptChunks } from '../../services/api';
+import { apiRequest } from '../../services/backendApi';
+
+const PLAYER_CONFIG = {
+  youtube: {
+    playerVars: {
+      controls: 0,
+      disablekb: 1,
+      fs: 0,
+      iv_load_policy: 3,
+      modestbranding: 1,
+      rel: 0
+    }
+  }
+};
+
+function formatPlayerTime(seconds) {
+  const safeSeconds = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
+  const hours = Math.floor(safeSeconds / 3600);
+  const minutes = Math.floor((safeSeconds % 3600) / 60);
+  const remainingSeconds = safeSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`;
+  }
+
+  return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`;
+}
+
+function findActiveTranscriptIndex(transcript, playedSeconds) {
+  if (!transcript?.length || playedSeconds < Number(transcript[0].start || 0)) return -1;
+
+  let low = 0;
+  let high = transcript.length - 1;
+  let activeIndex = -1;
+
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    const start = Number(transcript[middle].start || 0);
+
+    if (start <= playedSeconds) {
+      activeIndex = middle;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+
+  return activeIndex;
+}
+
+function getTranscriptLineRange(transcript, index) {
+  const line = transcript?.[index];
+  if (!line) return null;
+
+  const start = Number(line.start || 0);
+  const nextStart = Number(transcript[index + 1]?.start);
+  const duration = Number(line.duration || 0);
+  const end = Number.isFinite(nextStart) && nextStart > start
+    ? nextStart
+    : start + Math.max(duration, 0.5);
+
+  return { start, end };
+}
+
+function calculateHoaiMyRate(text, timelineDuration) {
+  const wordCount = text.trim().split(/\s+/).length;
+  const estimatedDuration = wordCount / 2.5;
+  return Math.max(-50, Math.min(100, Math.round((estimatedDuration / Math.max(timelineDuration, 0.5) - 1) * 100)));
+}
+
+function getHoaiMyAudioUrl(cache, text, timelineDuration) {
+  const rate = calculateHoaiMyRate(text, timelineDuration);
+  const cacheKey = `${rate}:${text}`;
+  if (cache.has(cacheKey)) return cache.get(cacheKey);
+
+  const audioUrlPromise = apiRequest('/api/videos/tts', {
+    method: 'POST',
+    body: { text, rate }
+  }).then(audioBlob => URL.createObjectURL(audioBlob));
+
+  cache.set(cacheKey, audioUrlPromise);
+  audioUrlPromise.catch(() => cache.delete(cacheKey));
+  return audioUrlPromise;
+}
+
+function getHoaiMyLineAudioUrl(cache, transcript, index) {
+  const line = transcript?.[index];
+  const range = getTranscriptLineRange(transcript, index);
+  if (!line?.text_vi || !range) return null;
+
+  return getHoaiMyAudioUrl(cache, line.text_vi, range.end - range.start);
+}
+
+function prefetchHoaiMyWindow(cache, transcript, startIndex, count = 5) {
+  if (startIndex < 0) return Promise.resolve([]);
+
+  const requests = [];
+  const endIndex = Math.min(transcript?.length || 0, startIndex + count);
+  for (let index = startIndex; index < endIndex; index += 1) {
+    const request = getHoaiMyLineAudioUrl(cache, transcript, index);
+    if (request) requests.push(request);
+  }
+
+  return Promise.allSettled(requests);
+}
+
+function waitForAudioMetadata(audio) {
+  if (audio.readyState >= 1 && Number.isFinite(audio.duration)) return Promise.resolve();
+
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      audio.removeEventListener('loadedmetadata', handleLoaded);
+      audio.removeEventListener('error', handleError);
+    };
+    const handleLoaded = () => {
+      cleanup();
+      resolve();
+    };
+    const handleError = () => {
+      cleanup();
+      reject(new Error('Cannot read HoaiMy audio metadata.'));
+    };
+
+    audio.addEventListener('loadedmetadata', handleLoaded, { once: true });
+    audio.addEventListener('error', handleError, { once: true });
+    audio.load();
+  });
+}
+
+function alignVoiceToTimeline(audio, range, currentTime) {
+  const timelineDuration = Math.max(range.end - range.start, 0.1);
+  const elapsedTimeline = Math.max(0, Math.min(timelineDuration, currentTime - range.start));
+  const audioDuration = Number.isFinite(audio.duration) && audio.duration > 0
+    ? audio.duration
+    : timelineDuration;
+  const exactPlaybackRate = audioDuration / timelineDuration;
+
+  audio.preservesPitch = true;
+  audio.playbackRate = Math.max(0.25, Math.min(4, exactPlaybackRate));
+  audio.currentTime = Math.min(
+    Math.max(0, elapsedTimeline * exactPlaybackRate),
+    Math.max(0, audioDuration - 0.03)
+  );
+}
+
+export function VideoDetail({ videoId, videos, setVideos, settings, onBack }) {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [translationProgress, setTranslationProgress] = useState(0);
+  const [activeTranscriptIndex, setActiveTranscriptIndex] = useState(-1);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [playedSeconds, setPlayedSeconds] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [volume, setVolume] = useState(0.8);
+  const [isMuted, setIsMuted] = useState(false);
+  const [showPlayerControls, setShowPlayerControls] = useState(true);
+  const [loopLineIndex, setLoopLineIndex] = useState(null);
+  const [isVietnameseVoiceEnabled, setIsVietnameseVoiceEnabled] = useState(false);
+  const [isVoiceBuffering, setIsVoiceBuffering] = useState(false);
+  const [voiceReplayKey, setVoiceReplayKey] = useState(0);
+  const [isScrubbing, setIsScrubbing] = useState(false);
+  const [showSubOriginal, setShowSubOriginal] = useState(true);
+  const [showSubVietnamese, setShowSubVietnamese] = useState(true);
+  const playerRef = useRef(null);
+  const videoStageRef = useRef(null);
+  const transcriptPanelRef = useRef(null);
+  const transcriptLineRefs = useRef([]);
+  const controlsTimerRef = useRef(null);
+  const mutedBeforeVietnameseVoiceRef = useRef(false);
+  const vietnameseVoiceEnabledRef = useRef(false);
+  const vietnameseAudioRef = useRef(null);
+  const hoaiMyAudioCacheRef = useRef(new Map());
+  const isScrubbingRef = useRef(false);
+  const voiceBufferRequestRef = useRef(0);
+
+  const video = videos.find(v => v.id === videoId);
+
+  useEffect(() => {
+    setActiveTranscriptIndex(-1);
+    setPlayedSeconds(0);
+    setDuration(0);
+    setLoopLineIndex(null);
+    setIsVietnameseVoiceEnabled(false);
+    setIsVoiceBuffering(false);
+    setVoiceReplayKey(0);
+    setIsScrubbing(false);
+    isScrubbingRef.current = false;
+    voiceBufferRequestRef.current += 1;
+    if (vietnameseVoiceEnabledRef.current) {
+      setIsMuted(mutedBeforeVietnameseVoiceRef.current);
+      vietnameseVoiceEnabledRef.current = false;
+    }
+    vietnameseAudioRef.current?.pause();
+    vietnameseAudioRef.current = null;
+    transcriptLineRefs.current = [];
+  }, [videoId]);
+
+  useEffect(() => {
+    clearTimeout(controlsTimerRef.current);
+
+    if (!isPlaying) {
+      setShowPlayerControls(true);
+      return undefined;
+    }
+
+    controlsTimerRef.current = setTimeout(() => setShowPlayerControls(false), 1800);
+    return () => clearTimeout(controlsTimerRef.current);
+  }, [isPlaying]);
+
+  useEffect(() => () => clearTimeout(controlsTimerRef.current), []);
+
+  useEffect(() => {
+    const cache = hoaiMyAudioCacheRef.current;
+    return () => {
+      vietnameseAudioRef.current?.pause();
+      vietnameseAudioRef.current = null;
+      cache.forEach(audioUrlPromise => {
+        Promise.resolve(audioUrlPromise).then(URL.revokeObjectURL).catch(() => {});
+      });
+      cache.clear();
+    };
+  }, [videoId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    vietnameseAudioRef.current?.pause();
+    vietnameseAudioRef.current = null;
+
+    if (!isVietnameseVoiceEnabled || !isPlaying || isScrubbing || activeTranscriptIndex < 0) {
+      return undefined;
+    }
+
+    const transcript = video?.transcript;
+    const line = transcript?.[activeTranscriptIndex];
+    const range = getTranscriptLineRange(transcript, activeTranscriptIndex);
+    if (!line?.text_vi || !range) return undefined;
+
+    prefetchHoaiMyWindow(
+      hoaiMyAudioCacheRef.current,
+      transcript,
+      activeTranscriptIndex,
+      5
+    ).catch(() => {});
+
+    const playVoice = async () => {
+      try {
+        const audioUrl = await getHoaiMyAudioUrl(
+          hoaiMyAudioCacheRef.current,
+          line.text_vi,
+          range.end - range.start
+        );
+        if (cancelled) return;
+
+        const audio = new Audio(audioUrl);
+        await waitForAudioMetadata(audio);
+        if (cancelled) return;
+
+        const currentVideoTime = Number(playerRef.current?.getCurrentTime?.() ?? range.start);
+        if (currentVideoTime >= range.end) return;
+
+        alignVoiceToTimeline(audio, range, currentVideoTime);
+        vietnameseAudioRef.current = audio;
+        await audio.play();
+      } catch (error) {
+        if (!cancelled) console.error('HoaiMy voice playback failed:', error);
+      }
+    };
+
+    playVoice();
+
+    return () => {
+      cancelled = true;
+      vietnameseAudioRef.current?.pause();
+      vietnameseAudioRef.current = null;
+    };
+  }, [activeTranscriptIndex, isPlaying, isScrubbing, isVietnameseVoiceEnabled, video, voiceReplayKey]);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(document.fullscreenElement === videoStageRef.current);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  useEffect(() => {
+    const handleKeyboardShortcut = event => {
+      const target = event.target;
+      const isEditing = target instanceof HTMLElement && (
+        target.isContentEditable
+        || ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(target.tagName)
+      );
+
+      if (isEditing || event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
+
+      if (event.code === 'Space') {
+        event.preventDefault();
+        setShowPlayerControls(true);
+        setIsPlaying(current => !current);
+        return;
+      }
+
+      if (event.code === 'KeyF') {
+        event.preventDefault();
+        if (document.fullscreenElement) {
+          document.exitFullscreen();
+        } else {
+          videoStageRef.current?.requestFullscreen();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyboardShortcut);
+    return () => window.removeEventListener('keydown', handleKeyboardShortcut);
+  }, []);
+
+  useEffect(() => {
+    const panel = transcriptPanelRef.current;
+    const activeLine = transcriptLineRefs.current[activeTranscriptIndex];
+    if (!panel || !activeLine) return;
+
+    const lineTop = activeLine.offsetTop;
+    const lineBottom = lineTop + activeLine.offsetHeight;
+    const viewportTop = panel.scrollTop;
+    const viewportBottom = viewportTop + panel.clientHeight;
+    const edgePadding = 16;
+
+    if (lineTop < viewportTop + edgePadding || lineBottom > viewportBottom - edgePadding) {
+      panel.scrollTo({
+        top: Math.max(0, lineTop - (panel.clientHeight - activeLine.offsetHeight) / 2),
+        behavior: 'smooth'
+      });
+    }
+  }, [activeTranscriptIndex]);
+
+  if (!video) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-md">
+        <div className="text-on-surface-variant">Không tìm thấy video.</div>
+        <button onClick={onBack} className="bg-primary text-on-primary px-lg py-sm rounded-[8px]">Quay lại</button>
+      </div>
+    );
+  }
+
+  const hasTranslation = video.transcript && video.transcript.some(t => t.text_vi);
+  const activeTranscriptLine = video.transcript?.[activeTranscriptIndex] || null;
+  const loopLineRange = getTranscriptLineRange(video.transcript, loopLineIndex);
+
+  const handleTranslate = async () => {
+    if (!video.transcript || video.transcript.length === 0) return;
+    setIsTranslating(true);
+    setTranslationProgress(0);
+
+    try {
+      const transcript = [...video.transcript];
+      const CHUNK_SIZE = 40; // 40 lines per request
+      const chunks = [];
+      for (let i = 0; i < transcript.length; i += CHUNK_SIZE) {
+        chunks.push(transcript.slice(i, i + CHUNK_SIZE));
+      }
+
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i];
+        const inputText = JSON.stringify(chunk.map(c => ({ text: c.text })));
+        const translatedArray = await translateTranscriptChunks(inputText, settings.apiKey, settings.model);
+        
+        if (Array.isArray(translatedArray)) {
+          for (let j = 0; j < chunk.length; j++) {
+            const globalIndex = i * CHUNK_SIZE + j;
+            if (transcript[globalIndex] && translatedArray[j]) {
+              transcript[globalIndex].text_vi = translatedArray[j];
+            }
+          }
+        }
+        
+        setTranslationProgress(Math.round(((i + 1) / chunks.length) * 100));
+      }
+
+      // Save back to state
+      const updatedVideo = { ...video, transcript };
+      setVideos(videos.map(v => v.id === video.id ? updatedVideo : v));
+
+    } catch (e) {
+      alert("Lỗi dịch: " + e.message);
+    } finally {
+      setIsTranslating(false);
+    }
+  };
+
+  const primeHoaiMyAtIndex = async index => {
+    if (index < 0) return;
+
+    const currentLineRequest = getHoaiMyLineAudioUrl(
+      hoaiMyAudioCacheRef.current,
+      video.transcript,
+      index
+    );
+    prefetchHoaiMyWindow(
+      hoaiMyAudioCacheRef.current,
+      video.transcript,
+      index + 1,
+      4
+    ).catch(() => {});
+
+    if (currentLineRequest) await currentLineRequest;
+  };
+
+  const bufferVoiceAndResume = async (index, shouldResume = true) => {
+    const requestId = voiceBufferRequestRef.current + 1;
+    voiceBufferRequestRef.current = requestId;
+    vietnameseAudioRef.current?.pause();
+    vietnameseAudioRef.current = null;
+    setIsVoiceBuffering(true);
+    setIsPlaying(false);
+
+    try {
+      await primeHoaiMyAtIndex(index);
+      if (voiceBufferRequestRef.current !== requestId) return;
+
+      setVoiceReplayKey(current => current + 1);
+      if (shouldResume) setIsPlaying(true);
+    } catch (error) {
+      if (voiceBufferRequestRef.current === requestId) {
+        console.error('HoaiMy voice buffering failed:', error);
+        if (shouldResume) setIsPlaying(true);
+      }
+    } finally {
+      if (voiceBufferRequestRef.current === requestId) setIsVoiceBuffering(false);
+    }
+  };
+
+  const handleSeek = (time) => {
+    const nextIndex = findActiveTranscriptIndex(video.transcript, time);
+    setPlayedSeconds(time);
+    setActiveTranscriptIndex(nextIndex);
+    if (loopLineIndex !== null && nextIndex >= 0) setLoopLineIndex(nextIndex);
+    if (playerRef.current) {
+      playerRef.current.seekTo(time, 'seconds');
+      if (isScrubbingRef.current) return;
+
+      if (isVietnameseVoiceEnabled) {
+        bufferVoiceAndResume(nextIndex);
+      } else {
+        setIsPlaying(true);
+      }
+    }
+  };
+
+  const handleProgress = ({ playedSeconds }) => {
+    if (
+      loopLineIndex !== null
+      && loopLineRange
+      && (playedSeconds >= loopLineRange.end - 0.05 || playedSeconds < loopLineRange.start - 0.1)
+    ) {
+      playerRef.current?.seekTo(loopLineRange.start, 'seconds');
+      setPlayedSeconds(loopLineRange.start);
+      setActiveTranscriptIndex(loopLineIndex);
+      if (isVietnameseVoiceEnabled) setVoiceReplayKey(current => current + 1);
+      return;
+    }
+
+    setPlayedSeconds(playedSeconds);
+    const nextIndex = findActiveTranscriptIndex(video.transcript, playedSeconds);
+    setActiveTranscriptIndex(currentIndex => currentIndex === nextIndex ? currentIndex : nextIndex);
+  };
+
+  const revealPlayerControls = () => {
+    setShowPlayerControls(true);
+    clearTimeout(controlsTimerRef.current);
+
+    if (isPlaying) {
+      controlsTimerRef.current = setTimeout(() => setShowPlayerControls(false), 1800);
+    }
+  };
+
+  const handlePlayerClick = () => {
+    setIsPlaying(current => !current);
+    revealPlayerControls();
+  };
+
+  const handleTimelineChange = event => {
+    handleSeek(Number(event.target.value));
+    revealPlayerControls();
+  };
+
+  const startTimelineScrubbing = () => {
+    isScrubbingRef.current = true;
+    voiceBufferRequestRef.current += 1;
+    setIsScrubbing(true);
+    setIsPlaying(false);
+    setIsVoiceBuffering(false);
+    vietnameseAudioRef.current?.pause();
+    vietnameseAudioRef.current = null;
+  };
+
+  const stopTimelineScrubbing = () => {
+    isScrubbingRef.current = false;
+    setIsScrubbing(false);
+    if (isVietnameseVoiceEnabled) {
+      bufferVoiceAndResume(activeTranscriptIndex);
+    } else {
+      setIsPlaying(true);
+    }
+  };
+
+  const handleVolumeChange = event => {
+    const nextVolume = Number(event.target.value);
+    setVolume(nextVolume);
+    setIsMuted(nextVolume === 0);
+    revealPlayerControls();
+  };
+
+  const toggleCurrentLineLoop = () => {
+    if (loopLineIndex !== null) {
+      setLoopLineIndex(null);
+      return;
+    }
+
+    const targetIndex = activeTranscriptIndex >= 0
+      ? activeTranscriptIndex
+      : findActiveTranscriptIndex(video.transcript, playedSeconds);
+    const targetRange = getTranscriptLineRange(video.transcript, targetIndex);
+    if (!targetRange) return;
+
+    setLoopLineIndex(targetIndex);
+    setPlayedSeconds(targetRange.start);
+    setActiveTranscriptIndex(targetIndex);
+    playerRef.current?.seekTo(targetRange.start, 'seconds');
+    setIsPlaying(true);
+  };
+
+  const toggleVietnameseVoice = async () => {
+    if (isVietnameseVoiceEnabled) {
+      voiceBufferRequestRef.current += 1;
+      vietnameseAudioRef.current?.pause();
+      vietnameseAudioRef.current = null;
+      setIsVietnameseVoiceEnabled(false);
+      vietnameseVoiceEnabledRef.current = false;
+      setIsMuted(mutedBeforeVietnameseVoiceRef.current);
+      return;
+    }
+
+    const targetIndex = activeTranscriptIndex >= 0
+      ? activeTranscriptIndex
+      : findActiveTranscriptIndex(video.transcript, playedSeconds);
+    const wasPlaying = isPlaying;
+    const requestId = voiceBufferRequestRef.current + 1;
+    voiceBufferRequestRef.current = requestId;
+
+    mutedBeforeVietnameseVoiceRef.current = isMuted;
+    vietnameseVoiceEnabledRef.current = true;
+    setIsMuted(true);
+    setIsVoiceBuffering(true);
+    setIsPlaying(false);
+
+    try {
+      await primeHoaiMyAtIndex(Math.max(0, targetIndex));
+      if (voiceBufferRequestRef.current !== requestId) {
+        vietnameseVoiceEnabledRef.current = false;
+        setIsMuted(mutedBeforeVietnameseVoiceRef.current);
+        return;
+      }
+
+      setIsVietnameseVoiceEnabled(true);
+      setVoiceReplayKey(current => current + 1);
+      if (wasPlaying) setIsPlaying(true);
+    } catch (error) {
+      if (voiceBufferRequestRef.current === requestId) {
+        console.error('HoaiMy voice buffering failed:', error);
+        vietnameseVoiceEnabledRef.current = false;
+        setIsMuted(mutedBeforeVietnameseVoiceRef.current);
+        alert(`Không thể tải voice HoaiMy: ${error.message}`);
+      }
+    } finally {
+      if (voiceBufferRequestRef.current === requestId) setIsVoiceBuffering(false);
+    }
+  };
+
+  const toggleFullscreen = async () => {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+      return;
+    }
+
+    await videoStageRef.current?.requestFullscreen();
+  };
+
+  return (
+    <div className="w-full h-full flex flex-col">
+      {/* Header */}
+      <div className="h-[60px] border-b border-hairline bg-surface flex items-center px-lg shrink-0 gap-md">
+        <button 
+          onClick={onBack}
+          className="p-xs rounded-lg hover:bg-surface-container-low text-on-surface-variant transition-colors"
+        >
+          <span className="material-symbols-outlined">arrow_back</span>
+        </button>
+        <h2 className="text-heading-2 font-heading-2 text-on-surface line-clamp-1 flex-1">{video.title}</h2>
+        
+        <div className="flex items-center gap-xs ml-auto mr-sm bg-surface-container-low p-1 rounded-[8px] border border-hairline">
+          <button 
+            onClick={() => setShowSubOriginal(!showSubOriginal)}
+            className={`px-sm py-1 rounded-[6px] font-medium text-body-sm transition-colors ${showSubOriginal ? 'bg-surface shadow-sm text-primary' : 'text-on-surface-variant hover:text-on-surface'}`}
+            title="Bật/tắt phụ đề gốc"
+          >
+            Gốc
+          </button>
+          <button 
+            onClick={() => setShowSubVietnamese(!showSubVietnamese)}
+            className={`px-sm py-1 rounded-[6px] font-medium text-body-sm transition-colors ${showSubVietnamese ? 'bg-surface shadow-sm text-primary' : 'text-on-surface-variant hover:text-on-surface'}`}
+            title="Bật/tắt phụ đề tiếng Việt"
+          >
+            Việt
+          </button>
+        </div>
+
+        {!hasTranslation && !isTranslating && (
+          <button 
+            onClick={handleTranslate}
+            className="bg-primary text-on-primary px-md py-xs rounded-[8px] font-button text-button hover:opacity-90 whitespace-nowrap"
+          >
+            Dịch Video
+          </button>
+        )}
+        {isTranslating && (
+          <div className="text-primary font-medium text-body-sm">
+            Đang dịch... {translationProgress}%
+          </div>
+        )}
+      </div>
+
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden bg-canvas">
+        {/* Left: Video Player */}
+        <div className="w-full md:w-2/3 lg:w-3/4 flex flex-col border-b md:border-b-0 md:border-r border-hairline relative h-[50vh] md:h-full bg-black">
+          <div
+            ref={videoStageRef}
+            className="flex-1 min-h-0 relative bg-black"
+            onMouseMove={revealPlayerControls}
+            onMouseLeave={() => { if (isPlaying) setShowPlayerControls(false); }}
+          >
+            <ReactPlayer
+              ref={playerRef}
+              url={`https://www.youtube.com/watch?v=${video.youtubeId}`}
+              width="100%"
+              height="100%"
+              playing={isPlaying}
+              volume={volume}
+              muted={isMuted}
+              progressInterval={100}
+              onPlay={() => setIsPlaying(true)}
+              onPause={() => setIsPlaying(false)}
+              onProgress={handleProgress}
+              onDuration={setDuration}
+              onSeek={time => setActiveTranscriptIndex(findActiveTranscriptIndex(video.transcript, time))}
+              controls={false}
+              config={PLAYER_CONFIG}
+            />
+
+            <button
+              type="button"
+              onClick={handlePlayerClick}
+              aria-label={isPlaying ? 'Tạm dừng video' : 'Phát video'}
+              className="absolute inset-0 z-[1] cursor-default bg-transparent"
+            />
+
+            {activeTranscriptLine && (showSubOriginal || showSubVietnamese) && (
+              <div className="pointer-events-none absolute inset-x-0 bottom-16 z-10 flex justify-center px-lg">
+                <div className={`w-full rounded-[8px] bg-black/75 text-center shadow-lg backdrop-blur-sm flex flex-col gap-xs ${isFullscreen
+                  ? 'max-w-5xl px-lg py-md'
+                  : 'max-w-3xl px-md py-sm'
+                }`}>
+                  {showSubOriginal && (
+                    <div className={`leading-tight font-semibold text-white ${isFullscreen
+                      ? 'text-[30px] lg:text-[36px]'
+                      : 'text-[22px] md:text-[26px]'
+                    }`}>
+                      {activeTranscriptLine.text}
+                    </div>
+                  )}
+                  {showSubVietnamese && activeTranscriptLine.text_vi && (
+                    <div className={`leading-relaxed font-medium text-accent-sky ${isFullscreen
+                      ? 'text-[20px] lg:text-[24px]'
+                      : 'text-[15px] md:text-[17px]'
+                    }`}>
+                      {activeTranscriptLine.text_vi}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className={`absolute inset-x-sm bottom-sm z-20 flex items-center gap-sm rounded-[8px] bg-black/80 px-sm py-xs text-white shadow-lg backdrop-blur-sm transition-opacity ${showPlayerControls || !isPlaying
+              ? 'opacity-100'
+              : 'pointer-events-none opacity-0'
+            }`}>
+              <button
+                type="button"
+                onClick={() => { setIsPlaying(current => !current); revealPlayerControls(); }}
+                title={isPlaying ? 'Tạm dừng' : 'Phát'}
+                aria-label={isPlaying ? 'Tạm dừng' : 'Phát'}
+                className="h-9 w-9 shrink-0 flex items-center justify-center rounded-[8px] hover:bg-white/15 transition-colors"
+              >
+                <span className="material-symbols-outlined text-[24px]">
+                  {isPlaying ? 'pause' : 'play_arrow'}
+                </span>
+              </button>
+
+              <span className="shrink-0 font-mono text-[11px] text-white/90">
+                {formatPlayerTime(playedSeconds)} / {formatPlayerTime(duration)}
+              </span>
+
+              <input
+                type="range"
+                min="0"
+                max={Math.max(duration, 0)}
+                step="0.1"
+                value={Math.min(playedSeconds, duration || 0)}
+                onChange={handleTimelineChange}
+                onPointerDown={startTimelineScrubbing}
+                onPointerUp={stopTimelineScrubbing}
+                onPointerCancel={stopTimelineScrubbing}
+                aria-label="Tua video"
+                className="h-1 min-w-0 flex-1 cursor-pointer accent-primary"
+              />
+
+              <button
+                type="button"
+                onClick={() => { setIsMuted(current => !current); revealPlayerControls(); }}
+                title={isMuted ? 'Bật âm thanh' : 'Tắt âm thanh'}
+                aria-label={isMuted ? 'Bật âm thanh' : 'Tắt âm thanh'}
+                className="h-9 w-9 shrink-0 flex items-center justify-center rounded-[8px] hover:bg-white/15 transition-colors"
+              >
+                <span className="material-symbols-outlined text-[22px]">
+                  {isMuted || volume === 0 ? 'volume_off' : 'volume_up'}
+                </span>
+              </button>
+
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={isMuted ? 0 : volume}
+                onChange={handleVolumeChange}
+                aria-label="Âm lượng"
+                className="hidden sm:block h-1 w-20 cursor-pointer accent-primary"
+              />
+
+              <button
+                type="button"
+                onClick={toggleFullscreen}
+                title={isFullscreen ? 'Thu nhỏ video' : 'Phóng to video'}
+                aria-label={isFullscreen ? 'Thu nhỏ video' : 'Phóng to video'}
+                className="h-9 w-9 shrink-0 flex items-center justify-center rounded-[8px] hover:bg-white/15 transition-colors"
+              >
+                <span className="material-symbols-outlined text-[22px]">
+                  {isFullscreen ? 'fullscreen_exit' : 'fullscreen'}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          <div className="h-[92px] shrink-0 border-t border-hairline bg-surface px-md py-xs text-on-surface">
+            <div className="flex h-9 items-center gap-sm">
+              <span className="w-12 shrink-0 text-right font-mono text-[11px] text-on-surface-variant">
+                {formatPlayerTime(playedSeconds)}
+              </span>
+              <input
+                type="range"
+                min="0"
+                max={Math.max(duration, 0)}
+                step="0.1"
+                value={Math.min(playedSeconds, duration || 0)}
+                onChange={handleTimelineChange}
+                onPointerDown={startTimelineScrubbing}
+                onPointerUp={stopTimelineScrubbing}
+                onPointerCancel={stopTimelineScrubbing}
+                aria-label="Điều chỉnh thời gian video"
+                className="h-2 min-w-0 flex-1 cursor-pointer accent-primary"
+              />
+              <span className="w-12 shrink-0 font-mono text-[11px] text-on-surface-variant">
+                {formatPlayerTime(duration)}
+              </span>
+            </div>
+
+            <div className="flex h-10 items-center justify-between gap-xs">
+              <div className="hidden min-w-0 truncate text-body-sm text-on-surface-variant sm:block">
+                {activeTranscriptIndex >= 0
+                  ? `Câu ${activeTranscriptIndex + 1} · ${formatPlayerTime(Number(activeTranscriptLine?.start || 0))}`
+                  : 'Chưa chọn câu phụ đề'}
+              </div>
+              <div className="ml-auto flex items-center gap-xs">
+                <button
+                  type="button"
+                  onClick={toggleVietnameseVoice}
+                  disabled={!hasTranslation || isVoiceBuffering}
+                  aria-pressed={isVietnameseVoiceEnabled}
+                  title={isVietnameseVoiceEnabled ? 'Tắt voice Microsoft HoaiMy' : 'Bật voice Microsoft HoaiMy'}
+                  className={`h-9 shrink-0 px-sm flex items-center gap-xs rounded-[8px] border font-button text-button transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${isVietnameseVoiceEnabled
+                    ? 'border-accent-sky bg-accent-sky text-on-primary-fixed'
+                    : 'border-hairline bg-surface-container-low text-on-surface hover:border-accent-sky hover:text-primary'
+                  }`}
+                >
+                  <span className={`material-symbols-outlined text-[20px] ${isVoiceBuffering ? 'animate-spin' : ''}`}>
+                    {isVoiceBuffering ? 'progress_activity' : 'record_voice_over'}
+                  </span>
+                  {isVoiceBuffering ? 'Đang tải voice...' : 'Voice HoaiMy'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={toggleCurrentLineLoop}
+                  disabled={loopLineIndex === null && activeTranscriptIndex < 0}
+                  aria-pressed={loopLineIndex !== null}
+                  title={loopLineIndex !== null ? 'Tắt lặp câu hiện tại' : 'Lặp câu hiện tại'}
+                  className={`h-9 shrink-0 px-sm flex items-center gap-xs rounded-[8px] border font-button text-button transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${loopLineIndex !== null
+                    ? 'border-primary bg-primary text-on-primary'
+                    : 'border-hairline bg-surface-container-low text-on-surface hover:border-primary hover:text-primary'
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-[20px]">repeat_one</span>
+                  {loopLineIndex !== null ? `Loop câu ${loopLineIndex + 1}` : 'Loop câu'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Right: Transcript */}
+        <div
+          ref={transcriptPanelRef}
+          className="w-full md:w-1/3 lg:w-1/4 h-[50vh] md:h-full overflow-y-auto bg-surface relative"
+        >
+          <div className="p-md flex flex-col gap-sm">
+            {video.transcript && video.transcript.map((line, index) => {
+              const isActive = index === activeTranscriptIndex;
+
+              return (
+                <div
+                  key={index}
+                  ref={element => { transcriptLineRefs.current[index] = element; }}
+                  aria-current={isActive ? 'true' : undefined}
+                  className={`relative p-sm rounded-[8px] cursor-pointer border transition-colors ${isActive
+                    ? 'bg-primary/10 border-primary/50 shadow-sm'
+                    : 'border-transparent hover:bg-surface-container-low hover:border-hairline'
+                  }`}
+                  onClick={() => handleSeek(line.start)}
+                >
+                  {isActive && (
+                    <span
+                      aria-hidden="true"
+                      className="absolute left-0 top-sm bottom-sm w-1 rounded-r-full bg-primary"
+                    />
+                  )}
+                  <div className={`font-mono text-[12px] mb-1 ${isActive ? 'text-primary font-semibold' : 'text-primary'}`}>
+                    {new Date(line.start * 1000).toISOString().substr(14, 5)}
+                  </div>
+                  {showSubOriginal && (
+                    <div className={`text-[15px] leading-relaxed ${isActive ? 'text-on-surface font-bold' : 'text-on-surface font-semibold'}`}>
+                      {line.text}
+                    </div>
+                  )}
+                  {showSubVietnamese && line.text_vi && (
+                    <div className={`text-[14px] mt-1 italic leading-relaxed ${isActive ? 'text-on-surface' : 'text-on-surface-variant'}`}>
+                      {line.text_vi}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {(!video.transcript || video.transcript.length === 0) && (
+              <div className="text-on-surface-variant text-center py-xl">
+                Không có phụ đề cho video này.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
