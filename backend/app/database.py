@@ -32,6 +32,16 @@ async def create_indexes(database) -> None:
             ("timestamp", DESCENDING),
         ]
     )
+    await database.video_learning_states.create_index(
+        [("userId", ASCENDING), ("videoId", ASCENDING)], unique=True
+    )
+    await database.video_learning_states.create_index("userId")
+    await database.video_learning_attempts.create_index(
+        [("userId", ASCENDING), ("videoId", ASCENDING), ("createdAt", DESCENDING)]
+    )
+    await database.video_learning_attempts.create_index(
+        [("userId", ASCENDING), ("videoId", ASCENDING), ("activity", ASCENDING)]
+    )
     for collection_name in ("study_state", "user_settings", "exam_writing_drafts"):
         await database[collection_name].create_index("userId", unique=True)
     await database.migration_records.create_index(
@@ -41,4 +51,3 @@ async def create_indexes(database) -> None:
 
 def create_client(uri: str) -> AsyncMongoClient:
     return AsyncMongoClient(uri)
-

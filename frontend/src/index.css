@@ -81,6 +81,39 @@
 }
 
 @layer utilities {
+  .learning-tool-button {
+    @apply inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-[7px] border border-hairline bg-surface-container-low px-xs text-[11px] font-medium text-on-surface transition-colors hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .learning-tool-button-active {
+    @apply border-primary bg-primary text-on-primary hover:text-on-primary;
+  }
+
+  .learning-tool-field {
+    @apply inline-flex h-8 shrink-0 items-center gap-1 rounded-[7px] border border-hairline bg-surface-container-low px-xs text-[11px] text-on-surface;
+  }
+
+  .learning-primary-button {
+    @apply inline-flex h-9 items-center justify-center gap-1 rounded-[8px] bg-primary px-md text-body-sm font-medium text-on-primary transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .transcript-action {
+    @apply inline-flex h-7 min-w-7 items-center justify-center rounded-[6px] text-[11px] text-on-surface-variant hover:bg-surface-container-highest hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary;
+  }
+
+  .transcript-action .material-symbols-outlined {
+    font-size: 17px;
+  }
+
+  .learning-result {
+    @apply mt-sm rounded-[8px] border border-hairline bg-surface-container-low p-sm text-body-sm text-on-surface;
+  }
+
+  @media print {
+    body { height: auto !important; overflow: visible !important; }
+    button, audio, input, select, textarea { display: none !important; }
+  }
+
   .shimmer {
     background: linear-gradient(
       90deg,

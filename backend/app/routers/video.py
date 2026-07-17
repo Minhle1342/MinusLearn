@@ -11,6 +11,13 @@ from yt_dlp.utils import DownloadError
 
 from ..dependencies import get_current_user, get_database
 from ..services.data_service import list_documents, replace_documents, upsert_document, patch_document
+from ..services.video_learning_service import (
+    add_learning_attempt,
+    delete_learning_data,
+    get_learning_state,
+    list_learning_attempts,
+    patch_learning_state,
+)
 
 router = APIRouter(prefix="/api", tags=["video"])
 HOAIMY_VOICE = "vi-VN-HoaiMyNeural"
@@ -250,4 +257,46 @@ async def update_video(legacy_id: str, payload: dict = Body(...), user=Depends(g
 
 @router.delete("/videos/{legacy_id}", status_code=204)
 async def delete_video(legacy_id: str, user=Depends(get_current_user), database=Depends(get_database)):
-    await database.videos.delete_one({"userId": user_id(user), "legacyId": legacy_id})
+    uid = user_id(user)
+    await database.videos.delete_one({"userId": uid, "legacyId": legacy_id})
+    await delete_learning_data(database, uid, legacy_id)
+
+
+@router.get("/videos/{video_id}/learning-state")
+async def get_video_learning_state(video_id: str, user=Depends(get_current_user), database=Depends(get_database)):
+    return await get_learning_state(database, user_id(user), video_id)
+
+
+@router.patch("/videos/{video_id}/learning-state")
+async def update_video_learning_state(
+    video_id: str,
+    payload: dict = Body(...),
+    user=Depends(get_current_user),
+    database=Depends(get_database),
+):
+    return await patch_learning_state(database, user_id(user), video_id, payload)
+
+
+@router.delete("/videos/{video_id}/learning-state", status_code=204)
+async def reset_video_learning_state(video_id: str, user=Depends(get_current_user), database=Depends(get_database)):
+    await delete_learning_data(database, user_id(user), video_id)
+
+
+@router.get("/videos/{video_id}/learning-attempts")
+async def get_video_learning_attempts(
+    video_id: str,
+    limit: int = 100,
+    user=Depends(get_current_user),
+    database=Depends(get_database),
+):
+    return await list_learning_attempts(database, user_id(user), video_id, limit)
+
+
+@router.post("/videos/{video_id}/learning-attempts", status_code=201)
+async def create_video_learning_attempt(
+    video_id: str,
+    payload: dict = Body(...),
+    user=Depends(get_current_user),
+    database=Depends(get_database),
+):
+    return await add_learning_attempt(database, user_id(user), video_id, payload)

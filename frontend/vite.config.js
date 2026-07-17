@@ -6,5 +6,11 @@ export default defineConfig({
   plugins: [react()],
   server: {
     allowedHosts: true
+  },
+  test: {
+    environment: 'jsdom',
+    setupFiles: './src/test/setup.js',
+    css: true,
+    exclude: ['node_modules/**', 'dist/**', 'src/utils/writingVisuals.test.js', 'src/utils/examWriting.test.js']
   }
 })

@@ -14,6 +14,8 @@ ARRAY_BACKUP_KEYS = {
     "minuslearn_writing_sessions": "writing_sessions",
     "minuslearn_writing_sentence_mistakes": "writing_sentence_mistakes",
     "minuslearn_exam_history": "exam_results",
+    "minuslearn_video_learning_states": "video_learning_states",
+    "minuslearn_video_learning_attempts": "video_learning_attempts",
 }
 STUDY_BACKUP_KEYS = {
     "minuslearn_sr_data": "srData",
@@ -187,4 +189,3 @@ async def replace_from_backup(database, user_id: str, data: dict[str, Any], sess
             {"userId": user_id, "draft": jsonable_encoder(draft), "updatedAt": utc_now()}, session=session
         )
     return counts
-

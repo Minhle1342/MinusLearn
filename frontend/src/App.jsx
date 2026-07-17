@@ -175,6 +175,65 @@ function LearningApp() {
     setIsWordModalOpen(false);
   };
 
+  const handleSaveVideoVocabulary = useCallback((video, wordData) => {
+    const sourceVideoTopicId = video.topicId || 'default-video';
+    const vocabularyTopicId = `video-vocabulary-${sourceVideoTopicId}`;
+    const sourceTopic = videoTopics.find(topic => topic.id === sourceVideoTopicId);
+    setTopics(currentTopics => currentTopics.some(topic => topic.sourceVideoTopicId === sourceVideoTopicId || topic.id === vocabularyTopicId)
+      ? currentTopics
+      : [...currentTopics, {
+          id: vocabularyTopicId,
+          sourceVideoTopicId,
+          name: `${sourceTopic?.name || 'Video'} · Từ vựng`,
+          colorClass: sourceTopic?.colorClass || 'bg-accent-sky',
+        }]);
+
+    const normalizedText = String(wordData.word || '').toLowerCase().replace(/[^a-z0-9'\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!normalizedText) return Promise.resolve();
+    return setWords(currentWords => {
+      const existing = currentWords.find(word => word.topicId === vocabularyTopicId && (
+        word.normalizedText === normalizedText
+        || String(word.word || '').toLowerCase().replace(/[^a-z0-9'\s]/g, ' ').replace(/\s+/g, ' ').trim() === normalizedText
+      ));
+      const occurrence = {
+        sourceVideoId: video.id,
+        sourceTitle: video.title,
+        sourceLineIndex: wordData.sourceLineIndex,
+        sourceStart: wordData.sourceStart,
+        sourceEnd: wordData.sourceEnd,
+        sentence: wordData.sourceSentence,
+        translation: wordData.sourceTranslation,
+        encounteredAt: Date.now(),
+      };
+      if (existing) {
+        const occurrences = existing.sourceOccurrences || [];
+        const isDuplicateOccurrence = occurrences.some(item => item.sourceVideoId === occurrence.sourceVideoId && item.sourceLineIndex === occurrence.sourceLineIndex);
+        return currentWords.map(word => word.id === existing.id ? {
+          ...word,
+          ...wordData,
+          id: word.id,
+          topicId: vocabularyTopicId,
+          normalizedText,
+          sourceOccurrences: isDuplicateOccurrence ? occurrences : [...occurrences, occurrence],
+          encounterCount: Number(word.encounterCount || 1) + (isDuplicateOccurrence ? 0 : 1),
+          updatedAt: Date.now(),
+        } : word);
+      }
+      return [...currentWords, {
+        ...wordData,
+        id: crypto.randomUUID(),
+        topicId: vocabularyTopicId,
+        sourceVideoTopicId,
+        normalizedText,
+        sourceOccurrences: [occurrence],
+        encounterCount: 1,
+        createdAt: Date.now(),
+      }];
+    });
+  }, [setTopics, setWords, videoTopics]);
+
+  const handleDeleteVideoVocabulary = useCallback(wordId => setWords(currentWords => currentWords.filter(word => word.id !== wordId)), [setWords]);
+
   return (
     <div className="flex flex-col h-screen w-full overflow-hidden">
       <TopNavBar
@@ -361,6 +420,13 @@ function LearningApp() {
                 settings={settings}
                 onVideoSelect={setActiveVideoId}
                 onPlaybackUpdate={handleVideoPlaybackUpdate}
+                videoTopic={videoTopics.find(topic => topic.id === videos.find(video => video.id === activeVideoId)?.topicId)}
+                videoVocabulary={words.filter(word => word.sourceVideoId === activeVideoId || word.sourceOccurrences?.some(item => item.sourceVideoId === activeVideoId))}
+                onSaveVocabulary={wordData => {
+                  const activeVideo = videos.find(video => video.id === activeVideoId);
+                  return activeVideo ? handleSaveVideoVocabulary(activeVideo, wordData) : Promise.resolve();
+                }}
+                onDeleteVocabulary={handleDeleteVideoVocabulary}
                 onBack={() => {
                   setActiveVideoId(null);
                   setActivePage('bilingual-video');

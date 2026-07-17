@@ -2,6 +2,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import ReactPlayer from 'react-player';
 import { translateTranscriptChunks } from '../../services/api';
 import { apiRequest } from '../../services/backendApi';
+import { useVideoLearningState } from '../../hooks/useVideoLearningState';
+import { LearningPlaybackToolbar } from '../video-learning/LearningPlaybackToolbar';
+import { VideoLearningSidebar } from '../video-learning/VideoLearningSidebar';
 
 const PLAYER_CONFIG = {
   youtube: {
@@ -158,7 +161,19 @@ function getFollowingUnwatchedVideos(videos, currentVideo) {
   return orderedVideos.filter(candidate => candidate.id !== currentVideo.id && !candidate.watchedAt);
 }
 
-export function VideoDetail({ videoId, videos, setVideos, settings, onBack, onVideoSelect, onPlaybackUpdate }) {
+export function VideoDetail({
+  videoId,
+  videos,
+  setVideos,
+  settings,
+  onBack,
+  onVideoSelect,
+  onPlaybackUpdate,
+  videoTopic,
+  videoVocabulary = [],
+  onSaveVocabulary = () => Promise.resolve(),
+  onDeleteVocabulary = () => Promise.resolve(),
+}) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [hasEnded, setHasEnded] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
@@ -175,8 +190,11 @@ export function VideoDetail({ videoId, videos, setVideos, settings, onBack, onVi
   const [isVoiceBuffering, setIsVoiceBuffering] = useState(false);
   const [voiceReplayKey, setVoiceReplayKey] = useState(0);
   const [isScrubbing, setIsScrubbing] = useState(false);
-  const [showSubOriginal, setShowSubOriginal] = useState(true);
-  const [showSubVietnamese, setShowSubVietnamese] = useState(true);
+  const [revealStage, setRevealStage] = useState('hidden');
+  const [abLoopRange, setAbLoopRange] = useState(null);
+  const [temporaryPlaybackRate, setTemporaryPlaybackRate] = useState(null);
+  const [practiceShortcut, setPracticeShortcut] = useState({ activity: null, lineIndex: -1, nonce: 0 });
+  const learning = useVideoLearningState(videoId);
   const playerRef = useRef(null);
   const videoStageRef = useRef(null);
   const transcriptPanelRef = useRef(null);
@@ -192,10 +210,20 @@ export function VideoDetail({ videoId, videos, setVideos, settings, onBack, onVi
   const lastSavedPositionRef = useRef(0);
   const lastSaveAtRef = useRef(0);
   const lastPeriodicSaveAtRef = useRef(0);
+  const lastLearningWatchAtRef = useRef(0);
   const hasEndedRef = useRef(false);
   const hasRestoredProgressRef = useRef(false);
+  const autoPauseTimerRef = useRef(null);
+  const lastAutoPausedLineRef = useRef(-1);
+  const replaySequenceRef = useRef(null);
 
   const video = videos.find(v => v.id === videoId);
+  const learningPreferences = learning.state.preferences;
+  const subtitleMode = learningPreferences.subtitleMode || 'bilingual';
+  const showSubOriginal = subtitleMode === 'bilingual' || subtitleMode === 'english'
+    || (subtitleMode === 'reveal' && ['english', 'vietnamese'].includes(revealStage));
+  const showSubVietnamese = subtitleMode === 'bilingual' || subtitleMode === 'vietnamese'
+    || (subtitleMode === 'reveal' && revealStage === 'vietnamese');
 
   const persistPlaybackProgress = ({ ended = false, force = false, keepalive = false } = {}) => {
     if (!video) return Promise.resolve();
@@ -260,7 +288,13 @@ export function VideoDetail({ videoId, videos, setVideos, settings, onBack, onVi
     lastSavedPositionRef.current = savedPosition;
     lastSaveAtRef.current = 0;
     lastPeriodicSaveAtRef.current = Date.now();
+    lastLearningWatchAtRef.current = Date.now();
     setLoopLineIndex(null);
+    setAbLoopRange(null);
+    replaySequenceRef.current = null;
+    setTemporaryPlaybackRate(null);
+    lastAutoPausedLineRef.current = -1;
+    clearTimeout(autoPauseTimerRef.current);
     setIsVietnameseVoiceEnabled(false);
     setIsVoiceBuffering(false);
     setVoiceReplayKey(0);
@@ -310,6 +344,22 @@ export function VideoDetail({ videoId, videos, setVideos, settings, onBack, onVi
   }, [isPlaying]);
 
   useEffect(() => () => clearTimeout(controlsTimerRef.current), []);
+
+  useEffect(() => () => clearTimeout(autoPauseTimerRef.current), []);
+
+  useEffect(() => {
+    if (subtitleMode !== 'reveal' || activeTranscriptIndex < 0) {
+      setRevealStage('hidden');
+      return undefined;
+    }
+    setRevealStage('hidden');
+    const englishTimer = setTimeout(() => setRevealStage('english'), 900);
+    const vietnameseTimer = setTimeout(() => setRevealStage('vietnamese'), 1900);
+    return () => {
+      clearTimeout(englishTimer);
+      clearTimeout(vietnameseTimer);
+    };
+  }, [activeTranscriptIndex, subtitleMode]);
 
   useEffect(() => {
     const cache = hoaiMyAudioCacheRef.current;
@@ -410,12 +460,48 @@ export function VideoDetail({ videoId, videos, setVideos, settings, onBack, onVi
         } else {
           videoStageRef.current?.requestFullscreen();
         }
+        return;
+      }
+
+      if (event.code === 'KeyJ' || event.code === 'KeyL') {
+        event.preventDefault();
+        const nextIndex = Math.max(0, Math.min((video?.transcript?.length || 1) - 1, activeTranscriptIndex + (event.code === 'KeyJ' ? -1 : 1)));
+        const range = getTranscriptLineRange(video?.transcript, nextIndex);
+        if (range) {
+          playerRef.current?.seekTo(Math.max(0, range.start - Number(learningPreferences.subtitleOffset || 0)), 'seconds');
+          setActiveTranscriptIndex(nextIndex);
+          setIsPlaying(true);
+        }
+        return;
+      }
+
+      if (event.code === 'KeyR') {
+        event.preventDefault();
+        playLearningLine(activeTranscriptIndex);
+        return;
+      }
+
+      if (event.code === 'KeyC') {
+        event.preventDefault();
+        const modes = ['bilingual', 'english', 'vietnamese', 'hidden', 'reveal'];
+        const nextMode = modes[(modes.indexOf(subtitleMode) + 1) % modes.length];
+        learning.updatePreferences({ subtitleMode: nextMode }).catch(() => {});
+        return;
+      }
+
+      if (event.code === 'KeyD' || event.code === 'KeyS') {
+        event.preventDefault();
+        setPracticeShortcut(current => ({
+          activity: event.code === 'KeyD' ? 'dictation' : 'shadowing',
+          lineIndex: Math.max(0, activeTranscriptIndex),
+          nonce: current.nonce + 1,
+        }));
       }
     };
 
     window.addEventListener('keydown', handleKeyboardShortcut);
     return () => window.removeEventListener('keydown', handleKeyboardShortcut);
-  }, []);
+  }, [activeTranscriptIndex, learningPreferences.subtitleOffset, subtitleMode, videoId]);
 
   useEffect(() => {
     const panel = transcriptPanelRef.current;
@@ -448,6 +534,10 @@ export function VideoDetail({ videoId, videos, setVideos, settings, onBack, onVi
   const hasTranslation = video.transcript && video.transcript.some(t => t.text_vi);
   const activeTranscriptLine = video.transcript?.[activeTranscriptIndex] || null;
   const loopLineRange = getTranscriptLineRange(video.transcript, loopLineIndex);
+  const abLoopMediaRange = abLoopRange ? {
+    start: Math.max(0, Number(getTranscriptLineRange(video.transcript, abLoopRange.start)?.start || 0) - Number(learningPreferences.subtitleOffset || 0)),
+    end: Math.max(0, Number(getTranscriptLineRange(video.transcript, abLoopRange.end)?.end || 0) - Number(learningPreferences.subtitleOffset || 0)),
+  } : null;
   const followingUnwatchedVideos = getFollowingUnwatchedVideos(videos, video);
   const nextVideo = followingUnwatchedVideos[0] || null;
   const fullscreenRecommendations = followingUnwatchedVideos.slice(0, 4);
@@ -535,14 +625,14 @@ export function VideoDetail({ videoId, videos, setVideos, settings, onBack, onVi
     }
   };
 
-  const handleSeek = (time) => {
+  const handleSeek = (time, shouldPlay = true) => {
     setHasEnded(false);
     hasEndedRef.current = false;
     playbackSnapshotRef.current = {
       ...playbackSnapshotRef.current,
       position: time
     };
-    const nextIndex = findActiveTranscriptIndex(video.transcript, time);
+    const nextIndex = findActiveTranscriptIndex(video.transcript, time + Number(learningPreferences.subtitleOffset || 0));
     setPlayedSeconds(time);
     setActiveTranscriptIndex(nextIndex);
     if (loopLineIndex !== null && nextIndex >= 0) setLoopLineIndex(nextIndex);
@@ -551,21 +641,126 @@ export function VideoDetail({ videoId, videos, setVideos, settings, onBack, onVi
       if (isScrubbingRef.current) return;
 
       if (isVietnameseVoiceEnabled) {
-        bufferVoiceAndResume(nextIndex);
+        bufferVoiceAndResume(nextIndex, shouldPlay);
       } else {
-        setIsPlaying(true);
+        if (shouldPlay) setIsPlaying(true);
       }
     }
   };
 
+  const seekToLine = (index, shouldPlay = true) => {
+    const range = getTranscriptLineRange(video.transcript, index);
+    if (!range) return;
+    handleSeek(Math.max(0, range.start - Number(learningPreferences.subtitleOffset || 0)), shouldPlay);
+    setActiveTranscriptIndex(index);
+  };
+
+  const playLearningLine = (index = activeTranscriptIndex, options = {}) => {
+    const targetIndex = index >= 0 ? index : findActiveTranscriptIndex(
+      video.transcript,
+      playedSeconds + Number(learningPreferences.subtitleOffset || 0)
+    );
+    const range = getTranscriptLineRange(video.transcript, targetIndex);
+    if (!range) return;
+    const offset = Number(learningPreferences.subtitleOffset || 0);
+    const rates = Number.isFinite(options.rate)
+      ? [options.rate]
+      : learningPreferences.progressiveReplay
+        ? [0.75, 0.9, 1]
+        : Array.from({ length: Number(learningPreferences.repeatCount || 1) }, () => Number(learningPreferences.playbackRate || 1));
+    replaySequenceRef.current = {
+      lineIndex: targetIndex,
+      start: Math.max(0, range.start - offset),
+      end: Math.max(0.1, range.end - offset),
+      rates,
+      iteration: 0,
+      pauseAfter: options.pauseAfter ?? Number.isFinite(options.rate),
+    };
+    setTemporaryPlaybackRate(rates[0]);
+    lastAutoPausedLineRef.current = -1;
+    playerRef.current?.seekTo(Math.max(0, range.start - offset), 'seconds');
+    setActiveTranscriptIndex(targetIndex);
+    setPlayedSeconds(Math.max(0, range.start - offset));
+    setIsPlaying(true);
+  };
+
+  const loopSpecificLine = index => {
+    if (loopLineIndex === index) {
+      setLoopLineIndex(null);
+      return;
+    }
+    setAbLoopRange(null);
+    setLoopLineIndex(index);
+    seekToLine(index);
+  };
+
+  const setAbLoopPoint = point => {
+    if (activeTranscriptIndex < 0) return;
+    setLoopLineIndex(null);
+    setAbLoopRange(current => {
+      if (!current) return { start: activeTranscriptIndex, end: activeTranscriptIndex };
+      const next = { ...current, [point]: activeTranscriptIndex };
+      return next.start <= next.end ? next : { start: next.end, end: next.start };
+    });
+  };
+
+  const updateLearningPreferences = changes => {
+    learning.updatePreferences(changes).catch(error => console.error('Failed to save learning preferences:', error));
+  };
+
+  const toggleSubtitleLanguage = language => {
+    if (language === 'english') {
+      const nextMode = showSubOriginal
+        ? (showSubVietnamese ? 'vietnamese' : 'hidden')
+        : (showSubVietnamese ? 'bilingual' : 'english');
+      updateLearningPreferences({ subtitleMode: nextMode });
+      return;
+    }
+    const nextMode = showSubVietnamese
+      ? (showSubOriginal ? 'english' : 'hidden')
+      : (showSubOriginal ? 'bilingual' : 'vietnamese');
+    updateLearningPreferences({ subtitleMode: nextMode });
+  };
+
   const handleProgress = ({ playedSeconds }) => {
+    const subtitleOffset = Number(learningPreferences.subtitleOffset || 0);
+    if (
+      abLoopMediaRange
+      && (playedSeconds >= abLoopMediaRange.end - 0.05 || playedSeconds < abLoopMediaRange.start - 0.1)
+    ) {
+      playerRef.current?.seekTo(abLoopMediaRange.start, 'seconds');
+      setPlayedSeconds(abLoopMediaRange.start);
+      setActiveTranscriptIndex(abLoopRange.start);
+      return;
+    }
+
+    const replaySequence = replaySequenceRef.current;
+    if (replaySequence && playedSeconds >= replaySequence.end - 0.05) {
+      const nextIteration = replaySequence.iteration + 1;
+      if (nextIteration < replaySequence.rates.length) {
+        replaySequence.iteration = nextIteration;
+        setTemporaryPlaybackRate(replaySequence.rates[nextIteration]);
+        playerRef.current?.seekTo(replaySequence.start, 'seconds');
+        setPlayedSeconds(replaySequence.start);
+        setActiveTranscriptIndex(replaySequence.lineIndex);
+        return;
+      }
+      replaySequenceRef.current = null;
+      setTemporaryPlaybackRate(null);
+      if (replaySequence.pauseAfter) {
+        setIsPlaying(false);
+        return;
+      }
+    }
+
     if (
       loopLineIndex !== null
       && loopLineRange
-      && (playedSeconds >= loopLineRange.end - 0.05 || playedSeconds < loopLineRange.start - 0.1)
+      && (playedSeconds >= loopLineRange.end - subtitleOffset - 0.05 || playedSeconds < Math.max(0, loopLineRange.start - subtitleOffset) - 0.1)
     ) {
-      playerRef.current?.seekTo(loopLineRange.start, 'seconds');
-      setPlayedSeconds(loopLineRange.start);
+      const loopStart = Math.max(0, loopLineRange.start - subtitleOffset);
+      playerRef.current?.seekTo(loopStart, 'seconds');
+      setPlayedSeconds(loopStart);
       setActiveTranscriptIndex(loopLineIndex);
       if (isVietnameseVoiceEnabled) setVoiceReplayKey(current => current + 1);
       return;
@@ -576,8 +771,22 @@ export function VideoDetail({ videoId, videos, setVideos, settings, onBack, onVi
       duration: playbackSnapshotRef.current.duration
     };
     setPlayedSeconds(playedSeconds);
-    const nextIndex = findActiveTranscriptIndex(video.transcript, playedSeconds);
+    const nextIndex = findActiveTranscriptIndex(video.transcript, playedSeconds + subtitleOffset);
     setActiveTranscriptIndex(currentIndex => currentIndex === nextIndex ? currentIndex : nextIndex);
+
+    const pauseLineIndex = activeTranscriptIndex >= 0 ? activeTranscriptIndex : nextIndex;
+    const currentRange = getTranscriptLineRange(video.transcript, pauseLineIndex);
+    if (
+      learningPreferences.autoPause
+      && currentRange
+      && lastAutoPausedLineRef.current !== pauseLineIndex
+      && playedSeconds >= currentRange.end - subtitleOffset - 0.08
+    ) {
+      lastAutoPausedLineRef.current = pauseLineIndex;
+      setIsPlaying(false);
+      clearTimeout(autoPauseTimerRef.current);
+      autoPauseTimerRef.current = setTimeout(() => setIsPlaying(true), Number(learningPreferences.autoPauseDelay || 1.5) * 1000);
+    }
 
     const now = Date.now();
     if (isPlaying && now - lastPeriodicSaveAtRef.current >= 10000) {
@@ -585,6 +794,13 @@ export function VideoDetail({ videoId, videos, setVideos, settings, onBack, onVi
       persistPlaybackProgress().catch(error => {
         console.error('Failed to save video progress:', error);
       });
+    }
+    if (isPlaying && now - lastLearningWatchAtRef.current >= 30000) {
+      lastLearningWatchAtRef.current = now;
+      learning.updateState(current => ({
+        ...current,
+        aggregateStats: { ...current.aggregateStats, watchSeconds: Number(current.aggregateStats?.watchSeconds || 0) + 30 },
+      })).catch(() => {});
     }
   };
 
@@ -610,7 +826,7 @@ export function VideoDetail({ videoId, videos, setVideos, settings, onBack, onVi
 
     playerRef.current?.seekTo(savedPosition, 'seconds');
     setPlayedSeconds(savedPosition);
-    setActiveTranscriptIndex(findActiveTranscriptIndex(video.transcript, savedPosition));
+    setActiveTranscriptIndex(findActiveTranscriptIndex(video.transcript, savedPosition + Number(learningPreferences.subtitleOffset || 0)));
     playbackSnapshotRef.current = {
       position: savedPosition,
       duration: savedDuration
@@ -684,11 +900,7 @@ export function VideoDetail({ videoId, videos, setVideos, settings, onBack, onVi
     const targetRange = getTranscriptLineRange(video.transcript, targetIndex);
     if (!targetRange) return;
 
-    setLoopLineIndex(targetIndex);
-    setPlayedSeconds(targetRange.start);
-    setActiveTranscriptIndex(targetIndex);
-    playerRef.current?.seekTo(targetRange.start, 'seconds');
-    setIsPlaying(true);
+    loopSpecificLine(targetIndex);
   };
 
   const toggleVietnameseVoice = async () => {
@@ -803,7 +1015,7 @@ export function VideoDetail({ videoId, videos, setVideos, settings, onBack, onVi
         >
           <span className="material-symbols-outlined">arrow_back</span>
         </button>
-        <h2 className="text-heading-2 font-heading-2 text-on-surface line-clamp-1 min-w-0 flex-1">{video.title}</h2>
+        <h2 className="text-heading-2 font-heading-2 text-on-surface line-clamp-1 min-w-0 flex-1" title={`${video.title}${videoTopic?.name ? ` · ${videoTopic.name}` : ''}`}>{video.title}</h2>
 
         {hasEnded && !isFullscreen && nextVideo && (
           <button
@@ -819,14 +1031,14 @@ export function VideoDetail({ videoId, videos, setVideos, settings, onBack, onVi
         
         <div className="flex items-center gap-xs ml-auto mr-sm bg-surface-container-low p-1 rounded-[8px] border border-hairline">
           <button 
-            onClick={() => setShowSubOriginal(!showSubOriginal)}
+            onClick={() => toggleSubtitleLanguage('english')}
             className={`px-sm py-1 rounded-[6px] font-medium text-body-sm transition-colors ${showSubOriginal ? 'bg-surface shadow-sm text-primary' : 'text-on-surface-variant hover:text-on-surface'}`}
             title="Bật/tắt phụ đề gốc"
           >
             Gốc
           </button>
           <button 
-            onClick={() => setShowSubVietnamese(!showSubVietnamese)}
+            onClick={() => toggleSubtitleLanguage('vietnamese')}
             className={`px-sm py-1 rounded-[6px] font-medium text-body-sm transition-colors ${showSubVietnamese ? 'bg-surface shadow-sm text-primary' : 'text-on-surface-variant hover:text-on-surface'}`}
             title="Bật/tắt phụ đề tiếng Việt"
           >
@@ -852,7 +1064,7 @@ export function VideoDetail({ videoId, videos, setVideos, settings, onBack, onVi
       {/* Main Content */}
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden bg-canvas">
         {/* Left: Video Player */}
-        <div className="w-full md:w-2/3 lg:w-3/4 flex flex-col border-b md:border-b-0 md:border-r border-hairline relative h-[50vh] md:h-full bg-black">
+        <div className="sticky top-0 z-10 flex h-[58vh] w-full flex-col border-b border-hairline bg-black md:static md:z-auto md:h-full md:min-w-0 md:flex-1 md:border-b-0 md:border-r">
           <div
             ref={videoStageRef}
             className="flex-1 min-h-0 relative bg-black"
@@ -867,6 +1079,7 @@ export function VideoDetail({ videoId, videos, setVideos, settings, onBack, onVi
               playing={isPlaying}
               volume={volume}
               muted={isMuted}
+              playbackRate={temporaryPlaybackRate ?? Number(learningPreferences.playbackRate || 1)}
               progressInterval={100}
               onReady={restoreSavedPosition}
               onPlay={() => { setIsPlaying(true); setHasEnded(false); hasEndedRef.current = false; }}
@@ -874,10 +1087,36 @@ export function VideoDetail({ videoId, videos, setVideos, settings, onBack, onVi
               onEnded={handleVideoEnded}
               onProgress={handleProgress}
               onDuration={handlePlayerDuration}
-              onSeek={time => setActiveTranscriptIndex(findActiveTranscriptIndex(video.transcript, time))}
+              onSeek={time => setActiveTranscriptIndex(findActiveTranscriptIndex(video.transcript, time + Number(learningPreferences.subtitleOffset || 0)))}
               controls={false}
               config={PLAYER_CONFIG}
             />
+
+            {learningPreferences.audioFocus && (
+              <div className="pointer-events-none absolute inset-0 z-[2] flex items-center justify-center bg-slate-950 text-white">
+                <div className="text-center">
+                  <span className="material-symbols-outlined text-[54px] text-accent-sky">headphones</span>
+                  <p className="mt-sm text-body-sm font-medium">Audio focus · Hình ảnh đang được che</p>
+                </div>
+              </div>
+            )}
+
+            {isFullscreen && !hasEnded && (
+              <div className="absolute inset-x-sm top-sm z-20 rounded-[8px] bg-surface/95 shadow-lg backdrop-blur-sm">
+                <LearningPlaybackToolbar
+                  preferences={learningPreferences}
+                  onPreferencesChange={updateLearningPreferences}
+                  activeLineIndex={activeTranscriptIndex}
+                  lineCount={video.transcript?.length || 0}
+                  onPreviousLine={() => seekToLine(activeTranscriptIndex - 1)}
+                  onNextLine={() => seekToLine(activeTranscriptIndex + 1)}
+                  onReplay={() => playLearningLine(activeTranscriptIndex)}
+                  loopRange={abLoopRange}
+                  onSetLoopPoint={setAbLoopPoint}
+                  onClearLoop={() => setAbLoopRange(null)}
+                />
+              </div>
+            )}
 
             {hasEnded && isFullscreen && (
               <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/95 p-lg text-white">
@@ -1100,56 +1339,38 @@ export function VideoDetail({ videoId, videos, setVideos, settings, onBack, onVi
               </div>
             </div>
           </div>
+          <LearningPlaybackToolbar
+            preferences={learningPreferences}
+            onPreferencesChange={updateLearningPreferences}
+            activeLineIndex={activeTranscriptIndex}
+            lineCount={video.transcript?.length || 0}
+            onPreviousLine={() => seekToLine(activeTranscriptIndex - 1)}
+            onNextLine={() => seekToLine(activeTranscriptIndex + 1)}
+            onReplay={() => playLearningLine(activeTranscriptIndex)}
+            loopRange={abLoopRange}
+            onSetLoopPoint={setAbLoopPoint}
+            onClearLoop={() => setAbLoopRange(null)}
+          />
         </div>
 
-        {/* Right: Transcript */}
-        <div
-          ref={transcriptPanelRef}
-          className="w-full md:w-1/3 lg:w-1/4 h-[50vh] md:h-full overflow-y-auto bg-surface relative"
-        >
-          <div className="p-md flex flex-col gap-sm">
-            {video.transcript && video.transcript.map((line, index) => {
-              const isActive = index === activeTranscriptIndex;
-
-              return (
-                <div
-                  key={index}
-                  ref={element => { transcriptLineRefs.current[index] = element; }}
-                  aria-current={isActive ? 'true' : undefined}
-                  className={`relative p-sm rounded-[8px] cursor-pointer border transition-colors ${isActive
-                    ? 'bg-primary/10 border-primary/50 shadow-sm'
-                    : 'border-transparent hover:bg-surface-container-low hover:border-hairline'
-                  }`}
-                  onClick={() => handleSeek(line.start)}
-                >
-                  {isActive && (
-                    <span
-                      aria-hidden="true"
-                      className="absolute left-0 top-sm bottom-sm w-1 rounded-r-full bg-primary"
-                    />
-                  )}
-                  <div className={`font-mono text-[12px] mb-1 ${isActive ? 'text-primary font-semibold' : 'text-primary'}`}>
-                    {new Date(line.start * 1000).toISOString().substr(14, 5)}
-                  </div>
-                  {showSubOriginal && (
-                    <div className={`text-[15px] leading-relaxed ${isActive ? 'text-on-surface font-bold' : 'text-on-surface font-semibold'}`}>
-                      {line.text}
-                    </div>
-                  )}
-                  {showSubVietnamese && line.text_vi && (
-                    <div className={`text-[14px] mt-1 italic leading-relaxed ${isActive ? 'text-on-surface' : 'text-on-surface-variant'}`}>
-                      {line.text_vi}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-            {(!video.transcript || video.transcript.length === 0) && (
-              <div className="text-on-surface-variant text-center py-xl">
-                Không có phụ đề cho video này.
-              </div>
-            )}
-          </div>
+        <div className="h-[60vh] min-h-0 w-full shrink-0 md:h-full md:w-auto">
+          <VideoLearningSidebar
+            video={video}
+            activeLineIndex={activeTranscriptIndex}
+            lineRefs={transcriptLineRefs}
+            panelRef={transcriptPanelRef}
+            settings={settings}
+            learning={learning}
+            videoVocabulary={videoVocabulary}
+            onSaveVocabulary={onSaveVocabulary}
+            onDeleteVocabulary={onDeleteVocabulary}
+            onSeekLine={seekToLine}
+            onSeekTime={time => handleSeek(time)}
+            onPlayLine={playLearningLine}
+            onPause={() => setIsPlaying(false)}
+            onLoopLine={loopSpecificLine}
+            practiceShortcut={practiceShortcut}
+          />
         </div>
       </div>
     </div>

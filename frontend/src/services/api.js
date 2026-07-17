@@ -856,3 +856,81 @@ ${chunksText}`;
 
   return result;
 }
+
+function validVideoLearningPack(pack) {
+  return pack && typeof pack.summaryEnglish === 'string'
+    && typeof pack.summaryVietnamese === 'string'
+    && Array.isArray(pack.keyPhrases)
+    && Array.isArray(pack.grammarNotes)
+    && Array.isArray(pack.questions)
+    && pack.questions.every(question => (
+      Number.isInteger(question.lineIndex)
+      && Array.isArray(question.options)
+      && Number.isInteger(question.answerIndex)
+      && typeof question.explanation === 'string'
+    ));
+}
+
+export async function generateVideoLearningPack(transcript, difficulty, apiKey, model) {
+  const indexedLines = (transcript || []).map((line, lineIndex) => ({
+    lineIndex,
+    start: Number(line.start || 0),
+    english: line.text || '',
+    vietnamese: line.text_vi || '',
+  }));
+  const chunks = [];
+  for (let index = 0; index < indexedLines.length; index += 80) {
+    chunks.push(indexedLines.slice(index, index + 80));
+  }
+
+  const chunkSummaries = [];
+  if (chunks.length > 1) {
+    for (const chunk of chunks) {
+      const summary = await callGeminiJson({
+        apiKey,
+        model,
+        systemInstruction: `Analyze one indexed bilingual transcript chunk. Return JSON only:
+{"english":"...","vietnamese":"...","keyPhrases":[{"phrase":"...","meaning":"...","collocation":"...","lineIndex":0}],"grammarNotes":[{"title":"...","explanation":"...","lineIndex":0}],"questionSeeds":[{"type":"main-idea|detail|inference|sequence|vocabulary","question":"...","answer":"...","lineIndex":0}],"importantLineIndexes":[0]}.
+Never invent a lineIndex; keep only the strongest learning material from this chunk.`,
+        prompt: JSON.stringify(chunk),
+        generationConfig: { temperature: 0.2 },
+      });
+      chunkSummaries.push(summary);
+    }
+  }
+
+  const systemInstruction = `You are an English-through-video learning designer. Return only valid JSON with this schema:
+{"summaryEnglish":"...","summaryVietnamese":"...","keyPhrases":[{"phrase":"...","meaning":"...","collocation":"...","lineIndex":0}],"grammarNotes":[{"title":"...","explanation":"...","parts":[{"text":"...","pos":"noun|verb|adjective|adverb|other"}],"lineIndex":0}],"questions":[{"type":"main-idea|detail|inference|sequence|vocabulary","question":"...","options":["..."],"answerIndex":0,"explanation":"...","lineIndex":0}],"replyPrompt":{"prompt":"...","lineIndex":0},"retellPrompt":"..."}.
+Every source lineIndex must exist in the transcript. Create 5-10 varied questions, always explain the answer, and adapt language to ${difficulty} difficulty.`;
+  const result = await callGeminiJson({
+    apiKey,
+    model,
+    systemInstruction,
+    prompt: JSON.stringify(chunks.length > 1
+      ? { difficulty, chunkAnalyses: chunkSummaries }
+      : { difficulty, transcript: indexedLines }),
+    generationConfig: { temperature: 0.35 },
+  });
+  if (!validVideoLearningPack(result)) throw new Error('Gói học tập AI không đúng cấu trúc. Vui lòng tạo lại.');
+  return result;
+}
+
+export async function explainVideoPhrase({ phrase, line, lineIndex }, apiKey, model) {
+  return callGeminiJson({
+    apiKey,
+    model,
+    systemInstruction: 'You are a concise bilingual English dictionary. Return JSON only: {"meaning":"Vietnamese contextual meaning","ipa":"...","partOfSpeech":"...","collocations":["..."],"example":"..."}. Explain the selected phrase in its supplied sentence.',
+    prompt: JSON.stringify({ phrase, line, lineIndex }),
+    generationConfig: { temperature: 0.2 },
+  });
+}
+
+export async function evaluateVideoLearningResponse({ activity, prompt, response, reference }, apiKey, model) {
+  return callGeminiJson({
+    apiKey,
+    model,
+    systemInstruction: 'Evaluate an English learner response. Return JSON only: {"score":0,"coverage":0,"coherence":0,"grammar":0,"vocabulary":0,"relevance":0,"feedbackVietnamese":"...","possiblePronunciationIssues":["..."]}. Do not claim phoneme-level acoustic scoring; pronunciation issues are only plausible inferences from recognized text.',
+    prompt: JSON.stringify({ activity, prompt, response, reference }),
+    generationConfig: { temperature: 0.2 },
+  });
+}
