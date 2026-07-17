@@ -583,6 +583,64 @@ Do NOT include Markdown formatting outside the JSON block.`;
  * Internal helper — calls Gemini and parses a JSON response.
  * Static systemInstruction is placed first for prompt-prefix caching.
  */
+export function parseGeminiJsonText(rawText) {
+  const text = String(rawText || '').trim();
+  if (!text) throw new Error('AI không trả về nội dung JSON.');
+
+  try {
+    return JSON.parse(text);
+  } catch (directParseError) {
+    for (let start = 0; start < text.length; start += 1) {
+      const opening = text[start];
+      if (opening !== '{' && opening !== '[') continue;
+
+      const stack = [];
+      let inString = false;
+      let escaping = false;
+      let structurallyInvalid = false;
+
+      for (let index = start; index < text.length; index += 1) {
+        const character = text[index];
+        if (inString) {
+          if (escaping) {
+            escaping = false;
+          } else if (character === '\\') {
+            escaping = true;
+          } else if (character === '"') {
+            inString = false;
+          }
+          continue;
+        }
+
+        if (character === '"') {
+          inString = true;
+        } else if (character === '{') {
+          stack.push('}');
+        } else if (character === '[') {
+          stack.push(']');
+        } else if (character === '}' || character === ']') {
+          if (stack.pop() !== character) {
+            structurallyInvalid = true;
+            break;
+          }
+          if (stack.length === 0) {
+            try {
+              return JSON.parse(text.slice(start, index + 1));
+            } catch {
+              structurallyInvalid = true;
+              break;
+            }
+          }
+        }
+      }
+
+      if (!structurallyInvalid && stack.length > 0) break;
+    }
+
+    throw new Error(`AI trả về JSON không hợp lệ: ${directParseError.message}`);
+  }
+}
+
 async function callGeminiJson({ apiKey, model, systemInstruction, prompt, generationConfig = {} }) {
   const body = {
     contents: [{ parts: [{ text: prompt }] }],
@@ -606,9 +664,11 @@ async function callGeminiJson({ apiKey, model, systemInstruction, prompt, genera
   }
 
   const data = await response.json();
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+  const text = data.candidates?.[0]?.content?.parts
+    ?.map(part => part.text || '')
+    .join('');
   if (!text) throw new Error('AI không trả về nội dung.');
-  return JSON.parse(text);
+  return parseGeminiJsonText(text);
 }
 
 const TASK1_DIAGRAM_SYSTEM_INSTRUCTION = `You are an IELTS Academic Writing Task 1 examiner and information-design specialist.
