@@ -10,6 +10,57 @@ def test_extract_youtube_id_supports_common_url_shapes():
     assert video.extract_youtube_id("pJdTyvufOdg") == "pJdTyvufOdg"
 
 
+def test_extract_youtube_playlist_id_supports_playlist_and_watch_urls():
+    playlist_id = "PL123_test-playlist"
+    assert video.extract_youtube_playlist_id(f"https://www.youtube.com/playlist?list={playlist_id}") == playlist_id
+    assert video.extract_youtube_playlist_id(f"https://www.youtube.com/watch?v=pJdTyvufOdg&list={playlist_id}") == playlist_id
+    assert video.extract_youtube_playlist_id(f"https://music.youtube.com/playlist?list={playlist_id}") == playlist_id
+    assert video.extract_youtube_playlist_id("https://example.com/playlist?list=PL123") is None
+
+
+def test_playlist_video_urls_normalizes_and_deduplicates_entries():
+    result = video.playlist_video_urls({
+        "entries": [
+            {"id": "pJdTyvufOdg"},
+            {"id": "pJdTyvufOdg"},
+            {"url": "https://www.youtube.com/watch?v=abcdefghijk"},
+            {"id": "not-a-video-id"},
+            None,
+        ]
+    })
+
+    assert result == [
+        "https://www.youtube.com/watch?v=pJdTyvufOdg",
+        "https://www.youtube.com/watch?v=abcdefghijk",
+    ]
+
+
+def test_extract_playlist_items_uses_canonical_playlist_url(monkeypatch):
+    def fake_fetch(playlist_url):
+        assert playlist_url == "https://www.youtube.com/playlist?list=PL123_test-playlist"
+        return {
+            "title": "English lessons",
+            "entries": [{"id": "pJdTyvufOdg"}, {"id": "abcdefghijk"}],
+        }
+
+    monkeypatch.setattr(video, "fetch_youtube_playlist_info", fake_fetch)
+
+    result = asyncio.run(video.extract_playlist_items(
+        {"url": "https://www.youtube.com/watch?v=pJdTyvufOdg&list=PL123_test-playlist"},
+        user={"userId": "test"},
+    ))
+
+    assert result == {
+        "playlistId": "PL123_test-playlist",
+        "title": "English lessons",
+        "count": 2,
+        "urls": [
+            "https://www.youtube.com/watch?v=pJdTyvufOdg",
+            "https://www.youtube.com/watch?v=abcdefghijk",
+        ],
+    }
+
+
 def test_extract_video_info_does_not_require_video_formats(monkeypatch):
     async def fake_metadata(video_id):
         assert video_id == "pJdTyvufOdg"

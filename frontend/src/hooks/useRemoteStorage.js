@@ -108,5 +108,12 @@ export function useRemoteStorage(key, initialValue) {
     return writeQueueRef.current;
   }, [key]);
 
-  return [storedValue, setValue, { loading, error }];
+  const updateLocalValue = useCallback(value => {
+    const nextValue = value instanceof Function ? value(valueRef.current) : value;
+    valueRef.current = nextValue;
+    setStoredValue(nextValue);
+    return nextValue;
+  }, []);
+
+  return [storedValue, setValue, { loading, error, updateLocalValue }];
 }

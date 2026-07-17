@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import { useRemoteStorage } from './hooks/useRemoteStorage';
 import { useAuth } from './contexts/AuthContext';
 import { AuthScreen } from './components/AuthScreen';
 import { GEMINI_DEFAULT_KEY, GEMINI_DEFAULT_MODEL } from './services/api';
+import { apiRequest } from './services/backendApi';
 
 import { TopNavBar } from './components/TopNavBar';
 import { Sidebar } from './components/Sidebar';
@@ -27,7 +28,7 @@ function LearningApp() {
     { id: 'default-video', name: 'General Video', colorClass: 'bg-accent-sky' }
   ]);
   const [words, setWords] = useRemoteStorage('minuslearn_words', []);
-  const [videos, setVideos] = useRemoteStorage('minuslearn_videos', []);
+  const [videos, setVideos, videosMeta] = useRemoteStorage('minuslearn_videos', []);
   const [settings, setSettings] = useRemoteStorage('minuslearn_settings', {
     apiKey: GEMINI_DEFAULT_KEY,
     model: GEMINI_DEFAULT_MODEL,
@@ -49,6 +50,18 @@ function LearningApp() {
   const [searchTerm, setSearchTerm] = useState('');
   const [mistakeFilter, setMistakeFilter] = useState('none');
   const [viewMode, setViewMode] = useRemoteStorage('minuslearn_view_mode', 'card');
+
+  const handleVideoPlaybackUpdate = useCallback((videoId, changes, options = {}) => {
+    videosMeta.updateLocalValue(currentVideos => currentVideos.map(video => (
+      video.id === videoId ? { ...video, ...changes } : video
+    )));
+
+    return apiRequest(`/api/videos/${encodeURIComponent(videoId)}`, {
+      method: 'PATCH',
+      body: changes,
+      keepalive: Boolean(options.keepalive)
+    });
+  }, [videosMeta.updateLocalValue]);
 
   const [isTopicModalOpen, setIsTopicModalOpen] = useState(false);
   const [topicToEdit, setTopicToEdit] = useState(null);
@@ -346,6 +359,8 @@ function LearningApp() {
                 videos={videos}
                 setVideos={setVideos}
                 settings={settings}
+                onVideoSelect={setActiveVideoId}
+                onPlaybackUpdate={handleVideoPlaybackUpdate}
                 onBack={() => {
                   setActiveVideoId(null);
                   setActivePage('bilingual-video');

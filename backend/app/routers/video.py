@@ -6,6 +6,8 @@ import edge_tts
 from edge_tts.exceptions import NoAudioReceived
 import httpx
 from youtube_transcript_api import YouTubeTranscriptApi
+import yt_dlp
+from yt_dlp.utils import DownloadError
 
 from ..dependencies import get_current_user, get_database
 from ..services.data_service import list_documents, replace_documents, upsert_document, patch_document
@@ -39,6 +41,51 @@ def extract_youtube_id(url: str) -> str | None:
         return url.strip()
 
     return None
+
+
+def extract_youtube_playlist_id(url: str) -> str | None:
+    parsed = urlparse(str(url or "").strip())
+    host = parsed.netloc.lower().removeprefix("www.")
+    if host not in {"youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}:
+        return None
+
+    playlist_id = parse_qs(parsed.query).get("list", [None])[0]
+    if not playlist_id or not all(character.isalnum() or character in "-_" for character in playlist_id):
+        return None
+    return playlist_id
+
+
+def fetch_youtube_playlist_info(playlist_url: str) -> dict:
+    options = {
+        "extract_flat": "in_playlist",
+        "skip_download": True,
+        "quiet": True,
+        "no_warnings": True,
+    }
+    with yt_dlp.YoutubeDL(options) as downloader:
+        return downloader.extract_info(playlist_url, download=False)
+
+
+def playlist_video_urls(playlist_info: dict) -> list[str]:
+    urls = []
+    known_ids = set()
+
+    for entry in playlist_info.get("entries") or []:
+        if not entry:
+            continue
+        video_id = str(entry.get("id") or "")
+        if len(video_id) != 11 or not all(character.isalnum() or character in "-_" for character in video_id):
+            video_id = extract_youtube_id(str(entry.get("url") or "")) or ""
+        if (
+            len(video_id) != 11
+            or not all(character.isalnum() or character in "-_" for character in video_id)
+            or video_id in known_ids
+        ):
+            continue
+        known_ids.add(video_id)
+        urls.append(f"https://www.youtube.com/watch?v={video_id}")
+
+    return urls
 
 
 async def fetch_youtube_metadata(video_id: str) -> tuple[str, str]:
@@ -131,6 +178,32 @@ async def extract_video_info(payload: dict = Body(...), user=Depends(get_current
         "title": title,
         "thumbnail": thumbnail,
         "transcript": transcript
+    }
+
+
+@router.post("/videos/playlist-items")
+async def extract_playlist_items(payload: dict = Body(...), user=Depends(get_current_user)):
+    playlist_id = extract_youtube_playlist_id(payload.get("url"))
+    if not playlist_id:
+        raise HTTPException(status_code=400, detail="Invalid YouTube playlist URL")
+
+    playlist_url = f"https://www.youtube.com/playlist?list={playlist_id}"
+    try:
+        playlist_info = await asyncio.to_thread(fetch_youtube_playlist_info, playlist_url)
+    except DownloadError as error:
+        raise HTTPException(status_code=400, detail=f"Failed to extract playlist: {error}") from error
+    except Exception as error:
+        raise HTTPException(status_code=502, detail=f"Failed to extract playlist: {error}") from error
+
+    urls = playlist_video_urls(playlist_info)
+    if not urls:
+        raise HTTPException(status_code=400, detail="No accessible videos found in this playlist")
+
+    return {
+        "playlistId": playlist_id,
+        "title": playlist_info.get("title") or "YouTube playlist",
+        "count": len(urls),
+        "urls": urls,
     }
 
 

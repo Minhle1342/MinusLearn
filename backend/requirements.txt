@@ -8,4 +8,5 @@ pwdlib[argon2]>=0.2,<1
 pytest>=8.3,<9
 httpx>=0.28,<1
 youtube-transcript-api>=1.2,<2.0
+yt-dlp>=2025.1,<2027
 edge-tts>=7.2.8,<8

@@ -146,8 +146,21 @@ function alignVoiceToTimeline(audio, range, currentTime) {
   );
 }
 
-export function VideoDetail({ videoId, videos, setVideos, settings, onBack }) {
+function getFollowingUnwatchedVideos(videos, currentVideo) {
+  if (!currentVideo) return [];
+
+  const sameTopicVideos = videos.filter(candidate => candidate.topicId === currentVideo.topicId);
+  const currentIndex = sameTopicVideos.findIndex(candidate => candidate.id === currentVideo.id);
+  const orderedVideos = currentIndex >= 0
+    ? [...sameTopicVideos.slice(currentIndex + 1), ...sameTopicVideos.slice(0, currentIndex)]
+    : sameTopicVideos;
+
+  return orderedVideos.filter(candidate => candidate.id !== currentVideo.id && !candidate.watchedAt);
+}
+
+export function VideoDetail({ videoId, videos, setVideos, settings, onBack, onVideoSelect, onPlaybackUpdate }) {
   const [isPlaying, setIsPlaying] = useState(false);
+  const [hasEnded, setHasEnded] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
   const [translationProgress, setTranslationProgress] = useState(0);
   const [activeTranscriptIndex, setActiveTranscriptIndex] = useState(-1);
@@ -175,13 +188,78 @@ export function VideoDetail({ videoId, videos, setVideos, settings, onBack }) {
   const hoaiMyAudioCacheRef = useRef(new Map());
   const isScrubbingRef = useRef(false);
   const voiceBufferRequestRef = useRef(0);
+  const playbackSnapshotRef = useRef({ position: 0, duration: 0 });
+  const lastSavedPositionRef = useRef(0);
+  const lastSaveAtRef = useRef(0);
+  const lastPeriodicSaveAtRef = useRef(0);
+  const hasEndedRef = useRef(false);
+  const hasRestoredProgressRef = useRef(false);
 
   const video = videos.find(v => v.id === videoId);
 
+  const persistPlaybackProgress = ({ ended = false, force = false, keepalive = false } = {}) => {
+    if (!video) return Promise.resolve();
+
+    const now = Date.now();
+    const position = Math.max(0, Number(playbackSnapshotRef.current.position || 0));
+    const savedDuration = Math.max(0, Number(playbackSnapshotRef.current.duration || 0));
+    const isAlmostFinished = savedDuration > 0 && (
+      savedDuration - position <= 10
+      || position / savedDuration >= 0.95
+    );
+
+    if (!ended && !isAlmostFinished && position < 5) return Promise.resolve();
+    if (
+      !ended
+      && !isAlmostFinished
+      && !force
+      && Math.abs(position - lastSavedPositionRef.current) < 5
+    ) return Promise.resolve();
+    if (
+      !ended
+      && Math.abs(position - lastSavedPositionRef.current) < 0.25
+      && now - lastSaveAtRef.current < 1000
+    ) return Promise.resolve();
+
+    const changes = ended || isAlmostFinished
+      ? {
+          resumePositionSeconds: 0,
+          playbackDurationSeconds: savedDuration,
+          lastWatchedAt: now,
+          watchedAt: now
+        }
+      : {
+          resumePositionSeconds: Math.round(position * 10) / 10,
+          playbackDurationSeconds: Math.round(savedDuration * 10) / 10,
+          lastWatchedAt: now,
+          watchedAt: null
+        };
+
+    lastSavedPositionRef.current = position;
+    lastSaveAtRef.current = now;
+
+    if (onPlaybackUpdate) {
+      return Promise.resolve(onPlaybackUpdate(video.id, changes, { keepalive }));
+    }
+
+    return Promise.resolve(setVideos(currentVideos => currentVideos.map(candidate => (
+      candidate.id === video.id ? { ...candidate, ...changes } : candidate
+    ))));
+  };
+
   useEffect(() => {
+    const savedPosition = Math.max(0, Number(video?.resumePositionSeconds || 0));
+    const savedDuration = Math.max(0, Number(video?.playbackDurationSeconds || 0));
+    setHasEnded(false);
+    hasEndedRef.current = false;
+    hasRestoredProgressRef.current = false;
     setActiveTranscriptIndex(-1);
-    setPlayedSeconds(0);
-    setDuration(0);
+    setPlayedSeconds(savedPosition);
+    setDuration(savedDuration);
+    playbackSnapshotRef.current = { position: savedPosition, duration: savedDuration };
+    lastSavedPositionRef.current = savedPosition;
+    lastSaveAtRef.current = 0;
+    lastPeriodicSaveAtRef.current = Date.now();
     setLoopLineIndex(null);
     setIsVietnameseVoiceEnabled(false);
     setIsVoiceBuffering(false);
@@ -196,6 +274,27 @@ export function VideoDetail({ videoId, videos, setVideos, settings, onBack }) {
     vietnameseAudioRef.current?.pause();
     vietnameseAudioRef.current = null;
     transcriptLineRefs.current = [];
+  }, [videoId]);
+
+  useEffect(() => {
+    const persistBeforeLeaving = keepalive => {
+      if (hasEndedRef.current) return;
+      persistPlaybackProgress({ force: true, keepalive }).catch(error => {
+        console.error('Failed to save video progress:', error);
+      });
+    };
+    const handlePageHide = () => persistBeforeLeaving(true);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') persistBeforeLeaving(true);
+    };
+
+    window.addEventListener('pagehide', handlePageHide);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      window.removeEventListener('pagehide', handlePageHide);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      persistBeforeLeaving(false);
+    };
   }, [videoId]);
 
   useEffect(() => {
@@ -349,6 +448,9 @@ export function VideoDetail({ videoId, videos, setVideos, settings, onBack }) {
   const hasTranslation = video.transcript && video.transcript.some(t => t.text_vi);
   const activeTranscriptLine = video.transcript?.[activeTranscriptIndex] || null;
   const loopLineRange = getTranscriptLineRange(video.transcript, loopLineIndex);
+  const followingUnwatchedVideos = getFollowingUnwatchedVideos(videos, video);
+  const nextVideo = followingUnwatchedVideos[0] || null;
+  const fullscreenRecommendations = followingUnwatchedVideos.slice(0, 4);
 
   const handleTranslate = async () => {
     if (!video.transcript || video.transcript.length === 0) return;
@@ -434,6 +536,12 @@ export function VideoDetail({ videoId, videos, setVideos, settings, onBack }) {
   };
 
   const handleSeek = (time) => {
+    setHasEnded(false);
+    hasEndedRef.current = false;
+    playbackSnapshotRef.current = {
+      ...playbackSnapshotRef.current,
+      position: time
+    };
     const nextIndex = findActiveTranscriptIndex(video.transcript, time);
     setPlayedSeconds(time);
     setActiveTranscriptIndex(nextIndex);
@@ -463,9 +571,59 @@ export function VideoDetail({ videoId, videos, setVideos, settings, onBack }) {
       return;
     }
 
+    playbackSnapshotRef.current = {
+      position: playedSeconds,
+      duration: playbackSnapshotRef.current.duration
+    };
     setPlayedSeconds(playedSeconds);
     const nextIndex = findActiveTranscriptIndex(video.transcript, playedSeconds);
     setActiveTranscriptIndex(currentIndex => currentIndex === nextIndex ? currentIndex : nextIndex);
+
+    const now = Date.now();
+    if (isPlaying && now - lastPeriodicSaveAtRef.current >= 10000) {
+      lastPeriodicSaveAtRef.current = now;
+      persistPlaybackProgress().catch(error => {
+        console.error('Failed to save video progress:', error);
+      });
+    }
+  };
+
+  const handlePlayerPause = () => {
+    setIsPlaying(false);
+    if (hasEndedRef.current) return;
+    persistPlaybackProgress({ force: true }).catch(error => {
+      console.error('Failed to save paused video progress:', error);
+    });
+  };
+
+  const restoreSavedPosition = () => {
+    if (hasRestoredProgressRef.current) return;
+    hasRestoredProgressRef.current = true;
+
+    const savedPosition = Math.max(0, Number(video.resumePositionSeconds || 0));
+    const savedDuration = Math.max(0, Number(video.playbackDurationSeconds || 0));
+    const canResume = savedPosition >= 5 && (
+      savedDuration === 0
+      || (savedDuration - savedPosition > 10 && savedPosition / savedDuration < 0.95)
+    );
+    if (!canResume) return;
+
+    playerRef.current?.seekTo(savedPosition, 'seconds');
+    setPlayedSeconds(savedPosition);
+    setActiveTranscriptIndex(findActiveTranscriptIndex(video.transcript, savedPosition));
+    playbackSnapshotRef.current = {
+      position: savedPosition,
+      duration: savedDuration
+    };
+  };
+
+  const handlePlayerDuration = nextDuration => {
+    setDuration(nextDuration);
+    playbackSnapshotRef.current = {
+      ...playbackSnapshotRef.current,
+      duration: nextDuration
+    };
+    restoreSavedPosition();
   };
 
   const revealPlayerControls = () => {
@@ -589,17 +747,75 @@ export function VideoDetail({ videoId, videos, setVideos, settings, onBack }) {
     await videoStageRef.current?.requestFullscreen();
   };
 
+  const handleVideoEnded = () => {
+    setIsPlaying(false);
+    setHasEnded(true);
+    hasEndedRef.current = true;
+    setShowPlayerControls(true);
+    vietnameseAudioRef.current?.pause();
+    vietnameseAudioRef.current = null;
+    playbackSnapshotRef.current = {
+      position: duration || playedSeconds,
+      duration: duration || playbackSnapshotRef.current.duration
+    };
+    persistPlaybackProgress({ ended: true, force: true }).catch(error => {
+      console.error('Failed to mark video as watched:', error);
+    });
+  };
+
+  const playSelectedVideo = selectedVideo => {
+    if (!selectedVideo) return;
+    setHasEnded(false);
+    hasEndedRef.current = false;
+    setIsPlaying(true);
+    onVideoSelect(selectedVideo.id);
+  };
+
+  const replayCurrentVideo = () => {
+    setHasEnded(false);
+    hasEndedRef.current = false;
+    setPlayedSeconds(0);
+    setActiveTranscriptIndex(-1);
+    playbackSnapshotRef.current = {
+      position: 0,
+      duration: playbackSnapshotRef.current.duration
+    };
+    playerRef.current?.seekTo(0, 'seconds');
+    setIsPlaying(true);
+  };
+
+  const handleBack = () => {
+    if (!hasEndedRef.current) {
+      persistPlaybackProgress({ force: true }).catch(error => {
+        console.error('Failed to save video progress before leaving:', error);
+      });
+    }
+    onBack();
+  };
+
   return (
     <div className="w-full h-full flex flex-col">
       {/* Header */}
       <div className="h-[60px] border-b border-hairline bg-surface flex items-center px-lg shrink-0 gap-md">
         <button 
-          onClick={onBack}
+          onClick={handleBack}
           className="p-xs rounded-lg hover:bg-surface-container-low text-on-surface-variant transition-colors"
         >
           <span className="material-symbols-outlined">arrow_back</span>
         </button>
-        <h2 className="text-heading-2 font-heading-2 text-on-surface line-clamp-1 flex-1">{video.title}</h2>
+        <h2 className="text-heading-2 font-heading-2 text-on-surface line-clamp-1 min-w-0 flex-1">{video.title}</h2>
+
+        {hasEnded && !isFullscreen && nextVideo && (
+          <button
+            type="button"
+            onClick={() => playSelectedVideo(nextVideo)}
+            title={nextVideo.title}
+            className="flex max-w-[220px] shrink-0 items-center gap-xs rounded-[8px] border border-hairline bg-surface-container-low px-sm py-xs text-on-surface hover:border-primary hover:text-primary transition-colors"
+          >
+            <span className="material-symbols-outlined shrink-0 text-[20px]">skip_next</span>
+            <span className="max-w-[72px] sm:max-w-[160px] truncate text-body-sm font-medium">{nextVideo.title}</span>
+          </button>
+        )}
         
         <div className="flex items-center gap-xs ml-auto mr-sm bg-surface-container-low p-1 rounded-[8px] border border-hairline">
           <button 
@@ -652,14 +868,69 @@ export function VideoDetail({ videoId, videos, setVideos, settings, onBack }) {
               volume={volume}
               muted={isMuted}
               progressInterval={100}
-              onPlay={() => setIsPlaying(true)}
-              onPause={() => setIsPlaying(false)}
+              onReady={restoreSavedPosition}
+              onPlay={() => { setIsPlaying(true); setHasEnded(false); hasEndedRef.current = false; }}
+              onPause={handlePlayerPause}
+              onEnded={handleVideoEnded}
               onProgress={handleProgress}
-              onDuration={setDuration}
+              onDuration={handlePlayerDuration}
               onSeek={time => setActiveTranscriptIndex(findActiveTranscriptIndex(video.transcript, time))}
               controls={false}
               config={PLAYER_CONFIG}
             />
+
+            {hasEnded && isFullscreen && (
+              <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/95 p-lg text-white">
+                <div className="w-full max-w-5xl">
+                  <div className="mb-md flex items-center justify-between gap-md">
+                    <div>
+                      <h3 className="text-[24px] font-semibold">Video tiếp theo cùng chủ đề</h3>
+                      <p className="mt-xs text-body-sm text-white/70">Chọn một video bạn chưa xem</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={replayCurrentVideo}
+                      className="shrink-0 flex items-center gap-xs rounded-[8px] border border-white/25 bg-white/10 px-md py-sm text-white hover:bg-white/20 transition-colors"
+                    >
+                      <span className="material-symbols-outlined text-[20px]">replay</span>
+                      Xem lại
+                    </button>
+                  </div>
+
+                  {fullscreenRecommendations.length > 0 ? (
+                    <div className="grid grid-cols-2 grid-rows-2 gap-md">
+                      {fullscreenRecommendations.map(recommendedVideo => (
+                        <button
+                          key={recommendedVideo.id}
+                          type="button"
+                          onClick={() => playSelectedVideo(recommendedVideo)}
+                          title={recommendedVideo.title}
+                          className="group min-w-0 overflow-hidden rounded-[12px] border border-white/15 bg-white/10 text-left hover:border-primary hover:bg-white/15 transition-colors"
+                        >
+                          <div className="flex items-center gap-md p-sm">
+                            <div className="relative aspect-video w-[42%] shrink-0 overflow-hidden rounded-[8px] bg-black">
+                              <img
+                                src={recommendedVideo.thumbnail}
+                                alt=""
+                                className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
+                              />
+                              <span className="material-symbols-outlined absolute inset-0 flex items-center justify-center bg-black/20 text-[36px] text-white opacity-80">play_circle</span>
+                            </div>
+                            <span className="line-clamp-2 min-w-0 text-[15px] font-semibold leading-snug text-white">
+                              {recommendedVideo.title}
+                            </span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rounded-[12px] border border-white/15 bg-white/10 px-lg py-xl text-center text-white/75">
+                      Bạn đã xem hết các video khác trong chủ đề này.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             <button
               type="button"
