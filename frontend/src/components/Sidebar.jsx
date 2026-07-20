@@ -1,43 +1,6 @@
 import React, { useMemo } from 'react';
 import { X, Plus, Edit2, Trash2, Flame } from 'lucide-react';
-
-/**
- * Calculate study streak from SR data.
- * A "study day" is any calendar day where at least one word was reviewed.
- * Streak = consecutive days counting backwards from today (or yesterday if not studied today yet).
- */
-function calcStreak(srData) {
-  // Collect all unique study dates (YYYY-MM-DD)
-  const studyDates = new Set();
-  for (const entry of Object.values(srData || {})) {
-    if (entry.lastReviewDate) {
-      const d = new Date(entry.lastReviewDate);
-      studyDates.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
-    }
-  }
-
-  const today = new Date();
-  const toDateStr = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
-  const todayStr = toDateStr(today);
-  const studiedToday = studyDates.has(todayStr);
-
-  // Count consecutive days backwards
-  let streak = 0;
-  let checkDate = new Date(today);
-
-  // If not studied today, start checking from yesterday
-  if (!studiedToday) {
-    checkDate.setDate(checkDate.getDate() - 1);
-  }
-
-  while (studyDates.has(toDateStr(checkDate))) {
-    streak++;
-    checkDate.setDate(checkDate.getDate() - 1);
-  }
-
-  return { streak, studiedToday };
-}
+import { calculateStudyStreak } from '../utils/spacedRepetition';
 
 export function Sidebar({
   isDrawerOpen,
@@ -52,7 +15,7 @@ export function Sidebar({
   srData
 }) {
   const toggleDrawer = () => setIsDrawerOpen(!isDrawerOpen);
-  const { streak, studiedToday } = useMemo(() => calcStreak(srData), [srData]);
+  const { streak, studiedToday } = useMemo(() => calculateStudyStreak(srData), [srData]);
 
   return (
     <>

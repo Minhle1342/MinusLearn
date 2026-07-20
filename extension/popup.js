@@ -2,6 +2,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const wordList = document.getElementById('word-list');
   const sendBtn = document.getElementById('send-btn');
   const emptyState = document.getElementById('empty-state');
+  const wordCount = document.getElementById('word-count');
   const topicSelect = document.getElementById('topic-select');
   const newTopicContainer = document.getElementById('new-topic-container');
   const newTopicInput = document.getElementById('new-topic-input');
@@ -43,6 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function renderWords() {
     chrome.storage.local.get({ words: [] }, (result) => {
       const words = result.words;
+      wordCount.textContent = `${words.length} ${words.length === 1 ? 'word' : 'words'}`;
       wordList.innerHTML = '';
       
       if (words.length === 0) {

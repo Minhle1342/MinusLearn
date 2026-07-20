@@ -10,10 +10,26 @@
       background: #f9f9ff;
       color: #181c22;
     }
+    .popup-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
     h3 {
-      margin: 0 0 12px 0;
+      margin: 0;
       font-size: 16px;
       color: #005db2;
+    }
+    #word-count {
+      flex-shrink: 0;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: #e7f0ff;
+      color: #005db2;
+      font-size: 12px;
+      font-weight: 700;
     }
     #word-list {
       list-style-type: none;
@@ -86,7 +102,10 @@
   </style>
 </head>
 <body>
-  <h3>MinusLearn Clipper</h3>
+  <div class="popup-header">
+    <h3>MinusLearn Clipper</h3>
+    <span id="word-count">0 words</span>
+  </div>
   <div id="empty-state" class="empty-state">No words collected yet. Highlight a word and right-click to add!</div>
   
   <ul id="word-list"></ul>

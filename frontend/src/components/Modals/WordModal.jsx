@@ -1,10 +1,126 @@
-import React, { useState, useEffect } from 'react';
-import { X, Sparkles, Image as ImageIcon } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { X, Sparkles, Image as ImageIcon, UploadCloud, FileText } from 'lucide-react';
 import { generateWordsFromText, generateImageForWord } from '../../services/api';
 import { downloadExternalImage } from '../../services/backendApi';
 
+const SUPPORTED_TEXT_EXTENSIONS = ['txt', 'md', 'csv', 'tsv', 'json', 'html', 'htm', 'rtf'];
+const FILE_ACCEPT_TYPES = [
+  '.pdf',
+  '.docx',
+  '.txt',
+  '.md',
+  '.csv',
+  '.tsv',
+  '.json',
+  '.html',
+  '.htm',
+  '.rtf',
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'text/*'
+].join(',');
+
+let pdfJsModulePromise;
+let mammothModulePromise;
+
+async function loadPdfJs() {
+  if (!pdfJsModulePromise) {
+    pdfJsModulePromise = Promise.all([
+      import('pdfjs-dist'),
+      import('pdfjs-dist/build/pdf.worker.mjs?url')
+    ]).then(([pdfjsLib, workerModule]) => {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = workerModule.default;
+      return pdfjsLib;
+    });
+  }
+
+  return pdfJsModulePromise;
+}
+
+async function loadMammoth() {
+  if (!mammothModulePromise) {
+    mammothModulePromise = import('mammoth').then(module => module.default || module);
+  }
+
+  return mammothModulePromise;
+}
+
+function normalizeDocumentText(text) {
+  return text
+    .replace(/\r/g, '')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function stripRtfToText(text) {
+  return text
+    .replace(/\\'[0-9a-fA-F]{2}/g, ' ')
+    .replace(/\\par[d]?/g, '\n')
+    .replace(/\\[a-zA-Z]+-?\d* ?/g, '')
+    .replace(/[{}]/g, '')
+    .replace(/\n{3,}/g, '\n\n');
+}
+
+async function extractPdfText(file) {
+  const pdfjsLib = await loadPdfJs();
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+  const pages = [];
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const textContent = await page.getTextContent();
+    const pageText = textContent.items
+      .map(item => item.str)
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (pageText) pages.push(pageText);
+  }
+
+  return pages.join('\n\n');
+}
+
+async function extractDocxText(file) {
+  const mammoth = await loadMammoth();
+  const arrayBuffer = await file.arrayBuffer();
+  const result = await mammoth.extractRawText({ arrayBuffer });
+  return result.value;
+}
+
+async function extractReadableFileText(file) {
+  const extension = file.name.split('.').pop()?.toLowerCase() || '';
+
+  if (extension === 'pdf' || file.type === 'application/pdf') {
+    return extractPdfText(file);
+  }
+
+  if (extension === 'docx' || file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+    return extractDocxText(file);
+  }
+
+  if (SUPPORTED_TEXT_EXTENSIONS.includes(extension) || file.type.startsWith('text/')) {
+    const text = await file.text();
+
+    if (extension === 'html' || extension === 'htm' || file.type === 'text/html') {
+      return new DOMParser().parseFromString(text, 'text/html').body.textContent || '';
+    }
+
+    if (extension === 'rtf') {
+      return stripRtfToText(text);
+    }
+
+    return text;
+  }
+
+  throw new Error('Định dạng này chưa được hỗ trợ. Hiện có thể đọc PDF, DOCX và các file văn bản như TXT/MD/CSV/HTML/RTF.');
+}
+
 export function WordModal({ isOpen, onClose, wordToEdit, onSave, onDelete, activeTopicId, settings, initialAiText }) {
   const [activeTab, setActiveTab] = useState('manual');
+  const documentPreviewRef = useRef(null);
 
   // Manual form state
   const [formData, setFormData] = useState({
@@ -20,6 +136,11 @@ export function WordModal({ isOpen, onClose, wordToEdit, onSave, onDelete, activ
   // AI form state
   const [aiText, setAiText] = useState('');
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
+  const [uploadedFileName, setUploadedFileName] = useState('');
+  const [uploadedFileText, setUploadedFileText] = useState('');
+  const [isReadingFile, setIsReadingFile] = useState(false);
+  const [fileReadError, setFileReadError] = useState('');
+  const [lastHighlightedText, setLastHighlightedText] = useState('');
 
   useEffect(() => {
     if (isOpen) {
@@ -29,6 +150,10 @@ export function WordModal({ isOpen, onClose, wordToEdit, onSave, onDelete, activ
       } else {
         setFormData({ word: '', phonetic: '', meaning: '', example: '', imageUrl: '' });
         setImageApiIndex(0);
+        setUploadedFileName('');
+        setUploadedFileText('');
+        setFileReadError('');
+        setLastHighlightedText('');
         if (initialAiText) {
           setAiText(initialAiText);
           setActiveTab('ai');
@@ -40,6 +165,64 @@ export function WordModal({ isOpen, onClose, wordToEdit, onSave, onDelete, activ
   }, [isOpen, wordToEdit, initialAiText]);
 
   if (!isOpen) return null;
+
+  const appendHighlightedTextToAiList = (text) => {
+    const selectedItems = text
+      .split(/\r?\n/)
+      .map(item => item.replace(/\s+/g, ' ').trim())
+      .filter(Boolean);
+
+    if (selectedItems.length === 0) return;
+
+    setAiText(prev => {
+      const existingItems = new Set(
+        prev
+          .split(/\r?\n|,/)
+          .map(item => item.trim().toLowerCase())
+          .filter(Boolean)
+      );
+      const nextItems = selectedItems.filter(item => !existingItems.has(item.toLowerCase()));
+
+      if (nextItems.length === 0) return prev;
+
+      return prev.trim() ? `${prev.trimEnd()}\n${nextItems.join('\n')}` : nextItems.join('\n');
+    });
+
+    setLastHighlightedText(selectedItems.join(', '));
+  };
+
+  const handleDocumentSelection = () => {
+    const selection = window.getSelection();
+    const selectedText = selection?.toString().trim();
+
+    if (!selectedText || !documentPreviewRef.current) return;
+    if (!documentPreviewRef.current.contains(selection.anchorNode) || !documentPreviewRef.current.contains(selection.focusNode)) return;
+
+    appendHighlightedTextToAiList(selectedText);
+  };
+
+  const handleFileUpload = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setActiveTab('ai');
+    setIsReadingFile(true);
+    setUploadedFileName(file.name);
+    setUploadedFileText('');
+    setFileReadError('');
+    setLastHighlightedText('');
+
+    try {
+      const text = normalizeDocumentText(await extractReadableFileText(file));
+      if (!text) throw new Error('Không tìm thấy text có thể highlight trong file này.');
+      setUploadedFileText(text);
+    } catch (error) {
+      setFileReadError(error.message || 'Không thể đọc file này.');
+    } finally {
+      setIsReadingFile(false);
+      event.target.value = '';
+    }
+  };
 
   const handleManualSubmit = async (e) => {
     e.preventDefault();
@@ -117,7 +300,7 @@ export function WordModal({ isOpen, onClose, wordToEdit, onSave, onDelete, activ
 
   return (
     <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center p-4 backdrop-blur-sm">
-      <div className="bg-surface rounded-[12px] shadow-lg w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div className={`bg-surface rounded-[12px] shadow-lg w-full overflow-hidden flex flex-col transition-all ${activeTab === 'ai' && uploadedFileText ? 'max-w-6xl max-h-[95vh]' : 'max-w-2xl max-h-[90vh]'}`}>
         <div className="p-lg border-b border-hairline flex justify-between items-center">
           <h3 className="font-heading-2 text-heading-2 text-on-surface">
             {wordToEdit ? 'Sửa từ vựng' : 'Thêm từ vựng mới'}
@@ -185,13 +368,63 @@ export function WordModal({ isOpen, onClose, wordToEdit, onSave, onDelete, activ
           ) : (
             <div className="flex flex-col gap-md h-full">
               <p className="text-sm text-on-surface-variant bg-surface-container p-sm rounded-lg border border-hairline">
-                Dán danh sách từ vựng vào đây. AI sẽ tự động phân tích và tạo card từ vựng cho từng từ (bao gồm cả việc tự động sinh ảnh).
+                Dán danh sách từ vựng hoặc tải file PDF/DOCX/TXT... Sau khi file được đọc, modal sẽ tự phóng to để bạn bôi đen từ/cụm từ và tự thêm vào textarea bên dưới.
               </p>
+              <div className="rounded-lg border border-dashed border-hairline bg-surface-container-lowest p-md">
+                <label className="flex cursor-pointer flex-col items-center justify-center gap-xs text-center text-on-surface-variant hover:text-primary">
+                  <UploadCloud size={24} />
+                  <span className="font-button text-sm">
+                    {isReadingFile ? 'Đang đọc file...' : 'Tải file tài liệu để highlight từ vựng'}
+                  </span>
+                  <span className="text-xs">Hỗ trợ PDF, DOCX, TXT, MD, CSV, HTML, RTF</span>
+                  <input
+                    type="file"
+                    accept={FILE_ACCEPT_TYPES}
+                    onChange={handleFileUpload}
+                    disabled={isReadingFile}
+                    className="hidden"
+                  />
+                </label>
+                {uploadedFileName && (
+                  <div className="mt-sm flex items-center justify-center gap-xs text-xs text-on-surface-variant">
+                    <FileText size={14} />
+                    <span className="truncate">{uploadedFileName}</span>
+                  </div>
+                )}
+                {fileReadError && (
+                  <p className="mt-sm rounded-md bg-error/10 p-xs text-xs text-error">{fileReadError}</p>
+                )}
+              </div>
+              {uploadedFileText && (
+                <div className="flex flex-col gap-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-xs">
+                    <label className="font-body-sm text-body-sm font-semibold text-on-surface-variant">
+                      Tài liệu đã phóng to — bôi đen từ cần thêm
+                    </label>
+                    {lastHighlightedText && (
+                      <span className="rounded-full bg-primary/10 px-sm py-1 text-xs text-primary">
+                        Đã thêm: {lastHighlightedText}
+                      </span>
+                    )}
+                  </div>
+                  <div
+                    ref={documentPreviewRef}
+                    onMouseUp={handleDocumentSelection}
+                    className="max-h-[420px] min-h-[320px] select-text overflow-y-auto whitespace-pre-wrap rounded-lg border border-hairline bg-white p-md text-lg leading-8 text-ink shadow-inner"
+                    title="Bôi đen một từ hoặc cụm từ để tự thêm vào danh sách bên dưới"
+                  >
+                    {uploadedFileText}
+                  </div>
+                </div>
+              )}
+              <label className="font-body-sm text-body-sm font-semibold text-on-surface-variant">
+                Danh sách từ vựng sẽ gửi cho AI
+              </label>
               <textarea
                 value={aiText}
                 onChange={e => setAiText(e.target.value)}
-                className="flex-1 min-h-[200px] p-sm bg-surface-container-lowest border border-hairline rounded-lg resize-none focus:ring-2 focus:ring-primary outline-none"
-                placeholder="VD: Apple, Banana, Orange..."
+                className={`${uploadedFileText ? 'min-h-[140px]' : 'min-h-[200px]'} flex-1 p-sm bg-surface-container-lowest border border-hairline rounded-lg resize-y focus:ring-2 focus:ring-primary outline-none`}
+                placeholder="VD: Apple, Banana, Orange... hoặc bôi đen từ trong tài liệu phía trên"
               ></textarea>
             </div>
           )}

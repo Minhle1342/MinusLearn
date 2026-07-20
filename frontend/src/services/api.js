@@ -895,26 +895,71 @@ Evaluate this essay now.`;
   });
 }
 
-export async function translateTranscriptChunks(chunksText, apiKey, model) {
-  const systemInstruction = `You are a professional English-Vietnamese translator.
-Translate the following video transcript chunks from English to Vietnamese.
-The input will be a JSON array of objects with "text" (English).
-You must return a JSON array of strings, where each string is the Vietnamese translation corresponding to the input chunk in the exact same order.
-Make the translation sound natural in the context of a video transcript.
-Return ONLY a JSON array of strings.`;
+export function normalizeTranscriptTranslations(inputLines, result) {
+  if (!Array.isArray(inputLines) || inputLines.length === 0) {
+    throw new Error('Batch transcript cần ít nhất một dòng để dịch.');
+  }
 
-  const prompt = `Translate these chunks:
-${chunksText}`;
+  const translations = result?.translations;
+  if (!Array.isArray(translations)) {
+    throw new Error('AI trả về batch dịch không đúng cấu trúc.');
+  }
+
+  const expectedIds = new Set(inputLines.map(line => String(line.id)));
+  const translationById = new Map();
+
+  for (const item of translations) {
+    const id = String(item?.id ?? '');
+    const translatedText = typeof item?.text_vi === 'string' ? item.text_vi.trim() : '';
+
+    if (!expectedIds.has(id)) {
+      throw new Error(`AI trả về ID transcript không hợp lệ: ${id || '(trống)'}.`);
+    }
+    if (translationById.has(id)) {
+      throw new Error(`AI trả về bản dịch trùng ID transcript: ${id}.`);
+    }
+    if (!translatedText) {
+      throw new Error(`AI trả về bản dịch rỗng cho transcript ${id}.`);
+    }
+
+    translationById.set(id, translatedText);
+  }
+
+  const missingIds = [...expectedIds].filter(id => !translationById.has(id));
+  if (missingIds.length > 0) {
+    throw new Error(`AI bỏ sót bản dịch transcript: ${missingIds.join(', ')}.`);
+  }
+
+  return inputLines.map(line => ({
+    id: line.id,
+    text_vi: translationById.get(String(line.id)),
+  }));
+}
+
+export async function translateTranscriptChunks(lines, apiKey, model) {
+  if (!Array.isArray(lines) || lines.length === 0) {
+    throw new Error('Batch transcript cần ít nhất một dòng để dịch.');
+  }
+
+  const systemInstruction = `You are a professional English-Vietnamese translator.
+Translate the supplied video transcript lines from English to Vietnamese.
+Each input line has a stable "id" and English "text".
+Return exactly one translation for every input id. Never change, infer, renumber, omit, duplicate, merge, or reorder ids.
+Make the translation sound natural in the context of a video transcript.
+Return ONLY this JSON shape: {"translations":[{"id":0,"text_vi":"..."}]}.`;
+
+  const prompt = `Translate these indexed transcript lines:
+${JSON.stringify({ lines })}`;
 
   const result = await callGeminiJson({
     apiKey,
     model,
     systemInstruction,
     prompt,
-    generationConfig: { temperature: 0.3 },
+    generationConfig: { temperature: 0.2 },
   });
 
-  return result;
+  return normalizeTranscriptTranslations(lines, result);
 }
 
 function validVideoLearningPack(pack) {

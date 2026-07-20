@@ -3,6 +3,7 @@ import { Volume2, Play, RotateCcw, Check, X, CheckCircle2, XCircle, Loader2, Boo
 import { useRemoteStorage } from '../../hooks/useRemoteStorage';
 import { speakEnglishText } from '../../utils/speech';
 import { generateIELTSListeningTest } from '../../services/api';
+import { recordReview } from '../../utils/spacedRepetition';
 
 export function ListeningPractice({ words, activeTopicId, topics, settings, setSrData }) {
   const [testState, setTestState] = useState('setup'); // 'setup', 'playing', 'results'
@@ -276,10 +277,10 @@ export function ListeningPractice({ words, activeTopicId, topics, settings, setS
         setSrData(prev => {
           const next = { ...prev };
           newResults.forEach(r => {
-            next[r.word.id] = {
-              ...(next[r.word.id] || { interval: 0, ease: 2.5, step: 0 }),
-              lastReviewDate: now
-            };
+            next[r.word.id] = recordReview(
+              next[r.word.id] || { interval: 0, ease: 2.5, step: 0 },
+              { lastReviewDate: now }
+            );
           });
           return next;
         });
@@ -333,10 +334,10 @@ export function ListeningPractice({ words, activeTopicId, topics, settings, setS
           setSrData(prev => {
             const next = { ...prev };
             newResults.forEach(r => {
-              next[r.word.id] = {
-                ...(next[r.word.id] || { interval: 0, ease: 2.5, step: 0 }),
-                lastReviewDate: now
-              };
+              next[r.word.id] = recordReview(
+                next[r.word.id] || { interval: 0, ease: 2.5, step: 0 },
+                { lastReviewDate: now }
+              );
             });
             return next;
           });

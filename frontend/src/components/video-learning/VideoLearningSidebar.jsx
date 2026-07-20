@@ -111,7 +111,7 @@ export function VideoLearningSidebar({
   };
 
   return (
-    <aside className="relative flex h-full min-h-0 w-full flex-col bg-surface md:w-[390px] lg:w-[430px]" aria-label="English Video Learning Studio">
+    <aside className="relative flex h-full min-h-0 w-full flex-col bg-surface" aria-label="English Video Learning Studio">
       <div className="grid shrink-0 grid-cols-4 border-b border-hairline bg-surface" role="tablist">
         {tabs.map(([value, label, icon]) => <button key={value} type="button" role="tab" aria-selected={activeTab === value} onClick={() => setActiveTab(value)} className={`flex min-w-0 flex-col items-center gap-0.5 border-b-2 px-xs py-sm text-[10px] font-medium transition-colors sm:text-[11px] ${activeTab === value ? 'border-primary text-primary' : 'border-transparent text-on-surface-variant hover:text-on-surface'}`}><span className="material-symbols-outlined text-[19px]">{icon}</span><span className="truncate">{label}</span></button>)}
       </div>

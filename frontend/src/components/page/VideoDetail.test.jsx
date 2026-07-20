@@ -5,6 +5,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { VideoDetail } from './VideoDetail';
 
 const playerMocks = vi.hoisted(() => ({ seekTo: vi.fn(), currentTime: 0 }));
+const apiMocks = vi.hoisted(() => ({ translateTranscriptChunks: vi.fn() }));
+
+vi.mock('../../services/api', () => ({
+  translateTranscriptChunks: apiMocks.translateTranscriptChunks,
+}));
 
 vi.mock('react-player', async () => {
   const ReactModule = await import('react');
@@ -43,7 +48,10 @@ const videos = [
 ];
 
 describe('VideoDetail regression coverage', () => {
-  beforeEach(() => playerMocks.seekTo.mockClear());
+  beforeEach(() => {
+    playerMocks.seekTo.mockClear();
+    apiMocks.translateTranscriptChunks.mockReset();
+  });
 
   it('restores saved progress and keeps the learning studio mounted', async () => {
     render(<VideoDetail videoId="video-1" videos={videos} setVideos={vi.fn()} settings={{}} onBack={vi.fn()} onVideoSelect={vi.fn()} onPlaybackUpdate={vi.fn(async () => {})} />);
@@ -63,5 +71,43 @@ describe('VideoDetail regression coverage', () => {
     await user.click(nextButton);
     expect(onVideoSelect).toHaveBeenCalledWith('video-2');
     expect(onPlaybackUpdate).toHaveBeenCalledWith('video-1', expect.objectContaining({ resumePositionSeconds: 0, watchedAt: expect.any(Number) }), expect.any(Object));
+  });
+
+  it('attaches translated text by transcript id instead of response position', async () => {
+    const user = userEvent.setup();
+    const sourceVideos = [{
+      ...videos[0],
+      transcript: [
+        { start: 0, duration: 1, text: 'First' },
+        { start: 1, duration: 1, text: 'Second' },
+        { start: 2, duration: 1, text: 'Third' },
+      ],
+    }];
+    let persistedVideos = sourceVideos;
+    const setVideos = vi.fn(updater => {
+      persistedVideos = updater(persistedVideos);
+      return Promise.resolve(persistedVideos);
+    });
+    apiMocks.translateTranscriptChunks.mockResolvedValue([
+      { id: 2, text_vi: 'Thứ ba' },
+      { id: 0, text_vi: 'Thứ nhất' },
+      { id: 1, text_vi: 'Thứ hai' },
+    ]);
+
+    render(<VideoDetail videoId="video-1" videos={sourceVideos} setVideos={setVideos} settings={{}} onBack={vi.fn()} onVideoSelect={vi.fn()} onPlaybackUpdate={vi.fn(async () => {})} />);
+    await user.click(screen.getByRole('button', { name: 'Dịch Video' }));
+
+    await waitFor(() => expect(setVideos).toHaveBeenCalledTimes(1));
+    expect(apiMocks.translateTranscriptChunks).toHaveBeenCalledWith([
+      { id: 0, text: 'First' },
+      { id: 1, text: 'Second' },
+      { id: 2, text: 'Third' },
+    ], undefined, undefined);
+    expect(persistedVideos[0].transcript.map(line => line.text_vi)).toEqual([
+      'Thứ nhất',
+      'Thứ hai',
+      'Thứ ba',
+    ]);
+    expect(persistedVideos[0].transcript.map(line => line.start)).toEqual([0, 1, 2]);
   });
 });

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { BookOpen, CheckCircle2, XCircle, Loader2, Clock, ChevronRight } from 'lucide-react';
 import { useRemoteStorage } from '../../hooks/useRemoteStorage';
 import { generateIELTSReadingTest, explainReadingAnswer, explainIeltsReadingAnswer } from '../../services/api';
+import { recordReview } from '../../utils/spacedRepetition';
 
 export function ReadingPractice({ words, activeTopicId, topics, settings, setSrData }) {
   const [testState, setTestState] = useState('setup'); // setup, playing, results
@@ -210,10 +211,10 @@ export function ReadingPractice({ words, activeTopicId, topics, settings, setSrD
           setSrData(prev => {
             const next = { ...prev };
             newResults.forEach(r => {
-              next[r.word.id] = {
-                ...(next[r.word.id] || { interval: 0, ease: 2.5, step: 0 }),
-                lastReviewDate: now
-              };
+              next[r.word.id] = recordReview(
+                next[r.word.id] || { interval: 0, ease: 2.5, step: 0 },
+                { lastReviewDate: now }
+              );
             });
             return next;
           });
@@ -262,10 +263,10 @@ export function ReadingPractice({ words, activeTopicId, topics, settings, setSrD
           setSrData(prev => {
             const next = { ...prev };
             newResults.forEach(r => {
-              next[r.word.id] = {
-                ...(next[r.word.id] || { interval: 0, ease: 2.5, step: 0 }),
-                lastReviewDate: now
-              };
+              next[r.word.id] = recordReview(
+                next[r.word.id] || { interval: 0, ease: 2.5, step: 0 },
+                { lastReviewDate: now }
+              );
             });
             return next;
           });

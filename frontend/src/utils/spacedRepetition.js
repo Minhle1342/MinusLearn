@@ -77,6 +77,83 @@ export function calculateSM2(quality, repetition, efactor, interval) {
   };
 }
 
+function toLocalDateKey(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Merge a review update without losing the calendar days stored by previous
+ * reviews. One timestamp per local calendar day is enough for streaks.
+ */
+export function recordReview(previousState, nextState) {
+  const previousHistory = Array.isArray(previousState?.reviewHistory)
+    ? previousState.reviewHistory
+    : [];
+  const candidates = [
+    ...previousHistory,
+    previousState?.lastReviewDate,
+    nextState?.lastReviewDate,
+  ];
+  const seenDates = new Set();
+  const reviewHistory = [];
+
+  for (const value of candidates) {
+    if (value == null) continue;
+    const dateKey = toLocalDateKey(value);
+    if (!dateKey || seenDates.has(dateKey)) continue;
+    seenDates.add(dateKey);
+    reviewHistory.push(new Date(value).getTime());
+  }
+
+  reviewHistory.sort((a, b) => a - b);
+
+  return {
+    ...(previousState || {}),
+    ...(nextState || {}),
+    reviewHistory,
+  };
+}
+
+/**
+ * Calculate the consecutive study-day streak from current and historical
+ * review timestamps. If today has not been studied yet, yesterday is used as
+ * the starting point so an active streak is not lost during the day.
+ */
+export function calculateStudyStreak(srData, now = new Date()) {
+  const studyDates = new Set();
+
+  for (const entry of Object.values(srData || {})) {
+    if (!entry || typeof entry !== 'object') continue;
+    const reviewDates = [
+      ...(Array.isArray(entry.reviewHistory) ? entry.reviewHistory : []),
+      entry.lastReviewDate,
+    ];
+
+    for (const value of reviewDates) {
+      if (value == null) continue;
+      const dateKey = toLocalDateKey(value);
+      if (dateKey) studyDates.add(dateKey);
+    }
+  }
+
+  const checkDate = new Date(now);
+  const todayKey = toLocalDateKey(checkDate);
+  const studiedToday = studyDates.has(todayKey);
+
+  if (!studiedToday) checkDate.setDate(checkDate.getDate() - 1);
+
+  let streak = 0;
+  while (studyDates.has(toLocalDateKey(checkDate))) {
+    streak++;
+    checkDate.setDate(checkDate.getDate() - 1);
+  }
+
+  return { streak, studiedToday };
+}
+
 /**
  * Given a quality score, preview what the next interval would be
  * WITHOUT mutating any state. Used to show interval hints on buttons.

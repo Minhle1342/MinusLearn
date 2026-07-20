@@ -19,6 +19,32 @@ const PLAYER_CONFIG = {
   }
 };
 
+const DEFAULT_LEARNING_SIDEBAR_WIDTH = 430;
+const MIN_LEARNING_SIDEBAR_WIDTH = 320;
+const MAX_LEARNING_SIDEBAR_WIDTH = 720;
+const SIDEBAR_WIDTH_STORAGE_KEY = 'minuslearn.videoLearningSidebarWidth';
+
+function clampLearningSidebarWidth(width, availableWidth = 0) {
+  const responsiveMax = availableWidth > 0
+    ? Math.min(MAX_LEARNING_SIDEBAR_WIDTH, Math.max(MIN_LEARNING_SIDEBAR_WIDTH, availableWidth * 0.55))
+    : MAX_LEARNING_SIDEBAR_WIDTH;
+
+  return Math.round(Math.min(Math.max(width, MIN_LEARNING_SIDEBAR_WIDTH), responsiveMax));
+}
+
+function getInitialLearningSidebarWidth() {
+  if (typeof window === 'undefined') return DEFAULT_LEARNING_SIDEBAR_WIDTH;
+
+  try {
+    const savedWidth = Number(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
+    return Number.isFinite(savedWidth)
+      ? clampLearningSidebarWidth(savedWidth, window.innerWidth)
+      : DEFAULT_LEARNING_SIDEBAR_WIDTH;
+  } catch {
+    return DEFAULT_LEARNING_SIDEBAR_WIDTH;
+  }
+}
+
 function formatPlayerTime(seconds) {
   const safeSeconds = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
   const hours = Math.floor(safeSeconds / 3600);
@@ -194,8 +220,10 @@ export function VideoDetail({
   const [abLoopRange, setAbLoopRange] = useState(null);
   const [temporaryPlaybackRate, setTemporaryPlaybackRate] = useState(null);
   const [practiceShortcut, setPracticeShortcut] = useState({ activity: null, lineIndex: -1, nonce: 0 });
+  const [learningSidebarWidth, setLearningSidebarWidth] = useState(getInitialLearningSidebarWidth);
   const learning = useVideoLearningState(videoId);
   const playerRef = useRef(null);
+  const mainContentRef = useRef(null);
   const videoStageRef = useRef(null);
   const transcriptPanelRef = useRef(null);
   const transcriptLineRefs = useRef([]);
@@ -346,6 +374,49 @@ export function VideoDetail({
   useEffect(() => () => clearTimeout(controlsTimerRef.current), []);
 
   useEffect(() => () => clearTimeout(autoPauseTimerRef.current), []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(learningSidebarWidth));
+    } catch {
+      // Ignore storage failures; resizing still works for the current session.
+    }
+  }, [learningSidebarWidth]);
+
+  const startLearningSidebarResize = event => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+
+    event.preventDefault();
+    const mainContentRect = mainContentRef.current?.getBoundingClientRect();
+    if (!mainContentRect) return;
+
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    const resize = pointerEvent => {
+      const nextWidth = mainContentRect.right - pointerEvent.clientX;
+      setLearningSidebarWidth(clampLearningSidebarWidth(nextWidth, mainContentRect.width));
+    };
+
+    const stopResize = () => {
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      window.removeEventListener('pointermove', resize);
+      window.removeEventListener('pointerup', stopResize);
+      window.removeEventListener('pointercancel', stopResize);
+    };
+
+    window.addEventListener('pointermove', resize);
+    window.addEventListener('pointerup', stopResize, { once: true });
+    window.addEventListener('pointercancel', stopResize, { once: true });
+  };
+
+  const adjustLearningSidebarWidth = delta => {
+    const availableWidth = mainContentRef.current?.getBoundingClientRect().width || window.innerWidth;
+    setLearningSidebarWidth(currentWidth => clampLearningSidebarWidth(currentWidth + delta, availableWidth));
+  };
 
   useEffect(() => {
     if (subtitleMode !== 'reveal' || activeTranscriptIndex < 0) {
@@ -548,33 +619,41 @@ export function VideoDetail({
     setTranslationProgress(0);
 
     try {
-      const transcript = [...video.transcript];
-      const CHUNK_SIZE = 40; // 40 lines per request
+      const transcript = video.transcript.map(line => ({ ...line }));
+      const indexedLines = transcript
+        .map((line, id) => ({ id, text: String(line.text || '').trim() }))
+        .filter(line => line.text);
+      const CHUNK_SIZE = 24;
       const chunks = [];
-      for (let i = 0; i < transcript.length; i += CHUNK_SIZE) {
-        chunks.push(transcript.slice(i, i + CHUNK_SIZE));
+      for (let i = 0; i < indexedLines.length; i += CHUNK_SIZE) {
+        chunks.push(indexedLines.slice(i, i + CHUNK_SIZE));
       }
 
       for (let i = 0; i < chunks.length; i++) {
         const chunk = chunks[i];
-        const inputText = JSON.stringify(chunk.map(c => ({ text: c.text })));
-        const translatedArray = await translateTranscriptChunks(inputText, settings.apiKey, settings.model);
-        
-        if (Array.isArray(translatedArray)) {
-          for (let j = 0; j < chunk.length; j++) {
-            const globalIndex = i * CHUNK_SIZE + j;
-            if (transcript[globalIndex] && translatedArray[j]) {
-              transcript[globalIndex].text_vi = translatedArray[j];
-            }
+        const translatedLines = await translateTranscriptChunks(
+          chunk,
+          settings.apiKey,
+          settings.model
+        );
+
+        for (const translatedLine of translatedLines) {
+          const lineIndex = Number(translatedLine.id);
+          if (!Number.isInteger(lineIndex) || !transcript[lineIndex]) {
+            throw new Error(`Không thể ghép bản dịch với transcript ${translatedLine.id}.`);
           }
+          transcript[lineIndex] = {
+            ...transcript[lineIndex],
+            text_vi: translatedLine.text_vi,
+          };
         }
-        
+
         setTranslationProgress(Math.round(((i + 1) / chunks.length) * 100));
       }
 
-      // Save back to state
-      const updatedVideo = { ...video, transcript };
-      setVideos(videos.map(v => v.id === video.id ? updatedVideo : v));
+      await setVideos(currentVideos => currentVideos.map(candidate => (
+        candidate.id === video.id ? { ...candidate, transcript } : candidate
+      )));
 
     } catch (e) {
       alert("Lỗi dịch: " + e.message);
@@ -1046,12 +1125,12 @@ export function VideoDetail({
           </button>
         </div>
 
-        {!hasTranslation && !isTranslating && (
+        {!isTranslating && (
           <button 
             onClick={handleTranslate}
             className="bg-primary text-on-primary px-md py-xs rounded-[8px] font-button text-button hover:opacity-90 whitespace-nowrap"
           >
-            Dịch Video
+            {hasTranslation ? 'Dịch lại Video' : 'Dịch Video'}
           </button>
         )}
         {isTranslating && (
@@ -1062,7 +1141,7 @@ export function VideoDetail({
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 flex flex-col md:flex-row overflow-hidden bg-canvas">
+      <div ref={mainContentRef} className="flex-1 flex flex-col md:flex-row overflow-hidden bg-canvas">
         {/* Left: Video Player */}
         <div className="sticky top-0 z-10 flex h-[58vh] w-full flex-col border-b border-hairline bg-black md:static md:z-auto md:h-full md:min-w-0 md:flex-1 md:border-b-0 md:border-r">
           <div
@@ -1353,7 +1432,39 @@ export function VideoDetail({
           />
         </div>
 
-        <div className="h-[60vh] min-h-0 w-full shrink-0 md:h-full md:w-auto">
+        <button
+          type="button"
+          onPointerDown={startLearningSidebarResize}
+          onDoubleClick={() => setLearningSidebarWidth(DEFAULT_LEARNING_SIDEBAR_WIDTH)}
+          onKeyDown={event => {
+            if (event.key === 'ArrowLeft') {
+              event.preventDefault();
+              adjustLearningSidebarWidth(24);
+            }
+            if (event.key === 'ArrowRight') {
+              event.preventDefault();
+              adjustLearningSidebarWidth(-24);
+            }
+            if (event.key === 'Home') {
+              event.preventDefault();
+              setLearningSidebarWidth(MIN_LEARNING_SIDEBAR_WIDTH);
+            }
+            if (event.key === 'End') {
+              event.preventDefault();
+              adjustLearningSidebarWidth(MAX_LEARNING_SIDEBAR_WIDTH);
+            }
+          }}
+          aria-label="Kéo để thay đổi chiều rộng sidebar học video"
+          title="Kéo để thay đổi chiều rộng sidebar. Double click để đặt lại."
+          className="group hidden w-2 shrink-0 cursor-col-resize items-center justify-center bg-canvas transition-colors hover:bg-primary/10 focus-visible:bg-primary/10 focus-visible:outline-none md:flex"
+        >
+          <span className="h-12 w-1 rounded-full bg-hairline transition-colors group-hover:bg-primary group-focus-visible:bg-primary" />
+        </button>
+
+        <div
+          className="h-[60vh] min-h-0 w-full shrink-0 md:h-full"
+          style={{ width: `min(100%, ${learningSidebarWidth}px)` }}
+        >
           <VideoLearningSidebar
             video={video}
             activeLineIndex={activeTranscriptIndex}

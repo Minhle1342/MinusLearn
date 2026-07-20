@@ -21,6 +21,7 @@ import {
 import { useRemoteStorage } from '../../hooks/useRemoteStorage';
 import { speakEnglishText, getEnglishVoices, getSelectedEnglishVoice } from '../../utils/speech';
 import { generateSpeakingScenario, chatWithNPC, evaluateSpeakingPractice } from '../../services/api';
+import { recordReview } from '../../utils/spacedRepetition';
 
 const EMOTION_EMOJIS = {
   happy: '😊',
@@ -261,10 +262,10 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
       setSrData(prev => {
         const next = { ...prev };
         sessionResults.forEach(r => {
-          next[r.word.id] = {
-            ...(next[r.word.id] || { interval: 0, ease: 2.5, step: 0 }),
-            lastReviewDate: now
-          };
+          next[r.word.id] = recordReview(
+            next[r.word.id] || { interval: 0, ease: 2.5, step: 0 },
+            { lastReviewDate: now }
+          );
         });
         return next;
       });

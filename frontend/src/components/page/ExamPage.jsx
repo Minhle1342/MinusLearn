@@ -26,6 +26,7 @@ import {
   countWords,
   formatWritingTime,
 } from '../../utils/examWriting';
+import { recordReview } from '../../utils/spacedRepetition';
 
 function shuffleArray(arr) {
   return [...arr].sort(() => 0.5 - Math.random());
@@ -529,10 +530,10 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
       setSrData(prev => {
         const next = { ...prev };
         selectedWords.forEach(w => {
-          next[w.id] = {
-            ...(next[w.id] || { interval: 0, ease: 2.5, step: 0 }),
-            lastReviewDate: now
-          };
+          next[w.id] = recordReview(
+            next[w.id] || { interval: 0, ease: 2.5, step: 0 },
+            { lastReviewDate: now }
+          );
         });
         return next;
       });

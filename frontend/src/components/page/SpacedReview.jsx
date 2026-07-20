@@ -7,6 +7,7 @@ import {
   getDueWords,
   getNextDueDate,
   initSRState,
+  recordReview,
 } from '../../utils/spacedRepetition';
 import { speakEnglishText } from '../../utils/speech';
 
@@ -86,7 +87,7 @@ export function SpacedReview({ words, activeTopicId, topics, srData, setSrData, 
     // Persist to srData
     setSrData(prev => ({
       ...prev,
-      [currentWord.id]: newState,
+      [currentWord.id]: recordReview(prev[currentWord.id], newState),
     }));
 
     // Record session result
