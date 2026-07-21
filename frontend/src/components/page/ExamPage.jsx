@@ -426,6 +426,32 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
     setIsPlaying(false);
   };
 
+  const handleReplayAnswerSegment = async (slow = false) => {
+    if (!examData?.listening?.dialogue || isPlaying) return;
+    
+    const currentQ = examData.listening.questions[currentListeningQ];
+    
+    let startLine = 0;
+    let endLine = examData.listening.dialogue.length - 1;
+
+    if (currentQ && typeof currentQ.answerLineIndex === 'number') {
+      startLine = Math.max(0, currentQ.answerLineIndex - 1);
+      endLine = Math.min(examData.listening.dialogue.length - 1, currentQ.answerLineIndex);
+    }
+
+    setIsPlaying(true);
+    const rate = slow ? 0.6 : 0.9;
+
+    for (let i = startLine; i <= endLine; i++) {
+      setCurrentDialogueLine(i);
+      await speakDialogueLine(examData.listening.dialogue[i], rate);
+      // Small pause between lines
+      await new Promise(r => setTimeout(r, 400));
+    }
+    setCurrentDialogueLine(examData.listening.dialogue.length);
+    setIsPlaying(false);
+  };
+
   const handleSelectListeningAnswer = (optionIndex) => {
     if (listeningSelectedOption !== null) return;
     setListeningSelectedOption(optionIndex);
@@ -1015,7 +1041,7 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
                 <h3 className="font-heading-2 text-heading-2 text-ink">Câu hỏi kiểm tra nghe</h3>
                 {(difficulty === 'Dễ' || difficulty === 'Trung bình') && (
                   <button
-                    onClick={() => handlePlayDialogue(false)}
+                    onClick={() => handleReplayAnswerSegment(false)}
                     disabled={isPlaying}
                     className="bg-surface-container-high text-on-surface font-button text-button py-sm px-md rounded-full shadow-sm hover:bg-surface-container-highest transition-all disabled:opacity-50 disabled:pointer-events-none flex items-center gap-xs text-sm"
                   >

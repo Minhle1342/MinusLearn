@@ -171,9 +171,9 @@ export async function generateExamContent(wordList, apiKey, model, difficulty = 
 TỪ VỰNG:${wordSummary}
 YÊU CẦU: Dùng mỗi từ >=1 lần.
 JSON SCHEMA:
-{"listening":{"dialogue":[{"speaker":"Tên","text":"Câu TA"}],"questions":[{"question":"Hỏi nội dung(TA)","questionTranslation":"Dịch nghĩa câu hỏi và bối cảnh (TV)","options":["A","B","C","D"],"correctIndex":0}]},"speaking":{"situation":"Tình huống(TV)","dialogue":[{"speaker":"Tên/You","text":"Câu TA","isUserTurn":false}]},"reading":[{"word":"Từ gốc","meaning":"Nghĩa TV","newExample":"Câu ví dụ MỚI","options":["TA đúng","TA sai","TA sai","TA sai"],"correctIndex":0}]}
+{"listening":{"dialogue":[{"speaker":"Tên","text":"Câu TA"}],"questions":[{"question":"Hỏi nội dung(TA)","questionTranslation":"Dịch nghĩa câu hỏi và bối cảnh (TV)","options":["A","B","C","D"],"correctIndex":0,"answerLineIndex":0}]},"speaking":{"situation":"Tình huống(TV)","dialogue":[{"speaker":"Tên/You","text":"Câu TA","isUserTurn":false}]},"reading":[{"word":"Từ gốc","meaning":"Nghĩa TV","newExample":"Câu ví dụ MỚI","options":["TA đúng","TA sai","TA sai","TA sai"],"correctIndex":0}]}
 QUY TẮC:
-- listening: ${isEasy ? '3-5' : c} câu hỏi.
+- listening: ${isEasy ? '3-5' : c} câu hỏi. "answerLineIndex" là vị trí index (bắt đầu từ 0) của câu dialogue chứa thông tin để trả lời.
 - speaking: "isUserTurn":true cho user. Tạo ${isEasy ? 'vài' : c} lượt user.
 - reading: ${isEasy ? 'Mỗi từ 1' : c} câu ví dụ MỚI. Options GỒM 4 TỪ TA (KHÔNG dùng tiếng Việt).`;
 
