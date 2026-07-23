@@ -10,6 +10,16 @@ import {
   recordReview,
 } from '../../utils/spacedRepetition';
 import { speakEnglishText } from '../../utils/speech';
+import { API_BASE_URL } from '../../services/backendApi';
+
+const resolveImageUrl = (url) => {
+  if (!url) return null;
+  if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:') || url.startsWith('blob:')) {
+    return url;
+  }
+  const cleanPath = url.startsWith('/') ? url : `/${url}`;
+  return `${API_BASE_URL}${cleanPath}`;
+};
 
 export function SpacedReview({ words, activeTopicId, topics, srData, setSrData, settings }) {
   const [phase, setPhase] = useState('setup'); // 'setup' | 'reviewing' | 'summary'
@@ -68,6 +78,37 @@ export function SpacedReview({ words, activeTopicId, topics, srData, setSrData, 
   // --- Phase: REVIEWING ---
   const currentWord = reviewQueue[currentIndex];
   const currentSR = currentWord ? { ...initSRState(), ...(srData[currentWord.id] || {}) } : initSRState();
+
+  const primaryImgSrc = useMemo(() => {
+    if (!currentWord) return null;
+    if (currentWord.imageUrl) return resolveImageUrl(currentWord.imageUrl);
+    if (currentWord.localImageUrl) return resolveImageUrl(currentWord.localImageUrl);
+    return null;
+  }, [currentWord]);
+
+  const [imgSrc, setImgSrc] = useState(primaryImgSrc);
+
+  useEffect(() => {
+    setImgSrc(primaryImgSrc);
+  }, [primaryImgSrc]);
+
+  const handleImageError = () => {
+    if (currentWord?.localImageUrl) {
+      const localUrl = resolveImageUrl(currentWord.localImageUrl);
+      if (imgSrc !== localUrl) {
+        setImgSrc(localUrl);
+        return;
+      }
+    }
+    if (currentWord?.imageUrl) {
+      const mainUrl = resolveImageUrl(currentWord.imageUrl);
+      if (imgSrc !== mainUrl) {
+        setImgSrc(mainUrl);
+        return;
+      }
+    }
+    setImgSrc(null);
+  };
 
   const handleFlip = () => {
     setIsFlipped(true);
@@ -243,7 +284,7 @@ export function SpacedReview({ words, activeTopicId, topics, srData, setSrData, 
     return (
       <div className="flex-1 flex flex-col items-center p-lg md:p-xl">
         {/* Progress bar */}
-        <div className="w-full max-w-xl mb-lg">
+        <div className="w-full max-w-2xl mb-lg">
           <div className="flex justify-between items-center mb-xs">
             <span className="text-body-sm text-on-surface-variant font-medium">
               {currentIndex + 1} / {reviewQueue.length}
@@ -264,14 +305,20 @@ export function SpacedReview({ words, activeTopicId, topics, srData, setSrData, 
         </div>
 
         {/* Flashcard */}
-        <div className="w-full max-w-xl flex-1 flex flex-col">
-          <div className="bg-surface border border-hairline rounded-[12px] shadow-sm flex-1 flex flex-col overflow-hidden">
+        <div className="w-full max-w-2xl flex-1 flex flex-col">
+          <div className="bg-surface border border-hairline rounded-[16px] shadow-sm flex-1 flex flex-col overflow-hidden">
             {/* Front face — always visible */}
             <div className="flex-1 flex flex-col items-center justify-center p-xl text-center">
               {/* Image */}
-              {currentWord.imageUrl && (
-                <div className="w-32 h-32 mb-lg rounded-[12px] overflow-hidden border border-hairline">
-                  <img src={currentWord.imageUrl} alt={currentWord.word} referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+              {imgSrc && (
+                <div className="w-full max-w-xl h-[360px] md:h-[450px] mb-lg rounded-[16px] overflow-hidden border border-hairline bg-surface-container-lowest shadow-sm">
+                  <img
+                    src={imgSrc}
+                    onError={handleImageError}
+                    alt={currentWord.word}
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-cover"
+                  />
                 </div>
               )}
 

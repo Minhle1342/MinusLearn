@@ -1,15 +1,50 @@
 import React, { useState, useEffect } from 'react';
-import { Volume2, Edit2 } from 'lucide-react';
+import { Volume2, Edit2, Repeat } from 'lucide-react';
 import { speakEnglishText } from '../../utils/speech';
 import { API_BASE_URL } from '../../services/backendApi';
 
 export function WordCard({ word, onEdit, viewMode = 'card', settings }) {
   const [isFlipped, setIsFlipped] = useState(false);
   const [imgSrc, setImgSrc] = useState(word.imageUrl || (word.localImageUrl ? API_BASE_URL + word.localImageUrl : null));
+  const [isAutoSpeaking, setIsAutoSpeaking] = useState(false);
 
   useEffect(() => {
     setImgSrc(word.imageUrl || (word.localImageUrl ? API_BASE_URL + word.localImageUrl : null));
   }, [word.imageUrl, word.localImageUrl]);
+
+  useEffect(() => {
+    setIsAutoSpeaking(false);
+  }, [word.id]);
+
+  useEffect(() => {
+    const handleOtherCardStart = (e) => {
+      if (e.detail?.wordId && e.detail.wordId !== word.id) {
+        setIsAutoSpeaking(false);
+      }
+    };
+
+    window.addEventListener('minuslearn-auto-speak-start', handleOtherCardStart);
+    return () => {
+      window.removeEventListener('minuslearn-auto-speak-start', handleOtherCardStart);
+    };
+  }, [word.id]);
+
+  useEffect(() => {
+    if (!isAutoSpeaking) return;
+
+    speakEnglishText(word.word, settings?.speechVoiceURI);
+
+    const intervalId = setInterval(() => {
+      speakEnglishText(word.word, settings?.speechVoiceURI);
+    }, 2000);
+
+    return () => {
+      clearInterval(intervalId);
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, [isAutoSpeaking, word.word, settings?.speechVoiceURI]);
 
   const handleImageError = () => {
     if (word.localImageUrl) {
@@ -23,6 +58,17 @@ export function WordCard({ word, onEdit, viewMode = 'card', settings }) {
   const speak = (e) => {
     e.stopPropagation();
     speakEnglishText(word.word, settings?.speechVoiceURI);
+  };
+
+  const toggleAutoSpeak = (e) => {
+    e.stopPropagation();
+    setIsAutoSpeaking(prev => {
+      const nextState = !prev;
+      if (nextState) {
+        window.dispatchEvent(new CustomEvent('minuslearn-auto-speak-start', { detail: { wordId: word.id } }));
+      }
+      return nextState;
+    });
   };
 
   const handleEditClick = (e) => {
@@ -42,12 +88,26 @@ export function WordCard({ word, onEdit, viewMode = 'card', settings }) {
           <div className="absolute inset-0 [backface-visibility:hidden] bg-surface border border-hairline rounded-[12px] shadow-sm flex flex-col items-center justify-center p-xl hover:shadow-md transition-shadow">
             <h3 className="font-title text-[36px] text-on-surface text-center mb-lg leading-tight">{word.word}</h3>
 
-            <button
-              onClick={speak}
-              className="w-12 h-12 bg-surface-container-lowest border border-hairline rounded-full flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-surface-container transition-colors shadow-sm"
-            >
-              <Volume2 size={24} />
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={speak}
+                title="Phát âm"
+                className="w-12 h-12 bg-surface-container-lowest border border-hairline rounded-full flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-surface-container transition-colors shadow-sm"
+              >
+                <Volume2 size={24} />
+              </button>
+              <button
+                onClick={toggleAutoSpeak}
+                title={isAutoSpeaking ? "Dừng phát âm tự động" : "Tự động phát âm mỗi 2s"}
+                className={`w-12 h-12 border border-hairline rounded-full flex items-center justify-center transition-colors shadow-sm ${
+                  isAutoSpeaking
+                    ? 'bg-primary text-on-primary animate-pulse'
+                    : 'bg-surface-container-lowest text-on-surface-variant hover:text-primary hover:bg-surface-container'
+                }`}
+              >
+                <Repeat size={22} />
+              </button>
+            </div>
 
             <div className="absolute top-sm right-sm opacity-0 group-hover:opacity-100 transition-opacity">
               <button onClick={handleEditClick} className="w-8 h-8 bg-surface-container-low rounded-full flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-surface-container">
@@ -76,6 +136,28 @@ export function WordCard({ word, onEdit, viewMode = 'card', settings }) {
                     {word.phonetic}
                   </span>
                 )}
+                <div className="flex items-center gap-2 mt-1 z-30">
+                  <button
+                    onClick={speak}
+                    title="Phát âm"
+                    className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors shadow-sm ${
+                      imgSrc ? 'bg-white/20 hover:bg-white/30 text-white' : 'bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-primary'
+                    }`}
+                  >
+                    <Volume2 size={14} />
+                  </button>
+                  <button
+                    onClick={toggleAutoSpeak}
+                    title={isAutoSpeaking ? "Dừng phát âm tự động" : "Tự động phát âm mỗi 2s"}
+                    className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors shadow-sm ${
+                      isAutoSpeaking
+                        ? 'bg-primary text-on-primary animate-pulse'
+                        : imgSrc ? 'bg-white/20 hover:bg-white/30 text-white' : 'bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-primary'
+                    }`}
+                  >
+                    <Repeat size={14} />
+                  </button>
+                </div>
               </div>
 
               <p className={`font-body-lg text-lg line-clamp-4 mt-2 ${imgSrc ? 'text-white/90' : 'text-on-surface-variant'}`}>
@@ -117,12 +199,26 @@ export function WordCard({ word, onEdit, viewMode = 'card', settings }) {
           </div>
         )}
 
-        <button
-          onClick={speak}
-          className="absolute bottom-sm right-sm w-8 h-8 bg-surface/80 backdrop-blur-md rounded-full flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-surface transition-colors shadow-sm opacity-0 group-hover:opacity-100 z-10"
-        >
-          <Volume2 size={16} />
-        </button>
+        <div className={`absolute bottom-sm right-sm flex items-center gap-1.5 z-10 transition-opacity ${isAutoSpeaking ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+          <button
+            onClick={speak}
+            title="Phát âm"
+            className="w-8 h-8 bg-surface/80 backdrop-blur-md rounded-full flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-surface transition-colors shadow-sm"
+          >
+            <Volume2 size={16} />
+          </button>
+          <button
+            onClick={toggleAutoSpeak}
+            title={isAutoSpeaking ? "Dừng phát âm tự động" : "Tự động phát âm mỗi 2s"}
+            className={`w-8 h-8 backdrop-blur-md rounded-full flex items-center justify-center transition-colors shadow-sm ${
+              isAutoSpeaking
+                ? 'bg-primary text-on-primary animate-pulse'
+                : 'bg-surface/80 text-on-surface-variant hover:text-primary hover:bg-surface'
+            }`}
+          >
+            <Repeat size={16} />
+          </button>
+        </div>
       </div>
 
       <div className="p-md flex flex-col gap-xs flex-1 cursor-pointer" onClick={handleEditClick}>
@@ -154,3 +250,4 @@ export function WordCard({ word, onEdit, viewMode = 'card', settings }) {
     </div>
   );
 }
+
