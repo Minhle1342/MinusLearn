@@ -42,6 +42,7 @@ async def bootstrap(user=Depends(get_current_user), database=Depends(get_databas
             "listeningMistakes": study.get("listeningMistakes", {}),
             "readingMistakes": study.get("readingMistakes", {}),
             "speakingMistakes": study.get("speakingMistakes", {}),
+            "academicCalendar": study.get("academicCalendar", None),
         },
     }
 
@@ -148,12 +149,13 @@ async def get_study_state(user=Depends(get_current_user), database=Depends(get_d
         "listeningMistakes": document.get("listeningMistakes", {}),
         "readingMistakes": document.get("readingMistakes", {}),
         "speakingMistakes": document.get("speakingMistakes", {}),
+        "academicCalendar": document.get("academicCalendar", None),
     }
 
 
 @router.put("/study-state")
 async def put_study_state(payload: dict = Body(...), user=Depends(get_current_user), database=Depends(get_database)):
-    allowed = {key: value for key, value in payload.items() if key in {"srData", "listeningMistakes", "readingMistakes", "speakingMistakes"}}
+    allowed = {key: value for key, value in payload.items() if key in {"srData", "listeningMistakes", "readingMistakes", "speakingMistakes", "academicCalendar"}}
     uid = user_id(user)
     await database.study_state.update_one(
         {"userId": uid}, {"$set": {"userId": uid, **allowed, "updatedAt": datetime.now(timezone.utc)}}, upsert=True

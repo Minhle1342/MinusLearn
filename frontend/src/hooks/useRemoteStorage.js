@@ -12,6 +12,7 @@ const STUDY_FIELDS = {
   minuslearn_mistakes: 'listeningMistakes',
   minuslearn_reading_mistakes: 'readingMistakes',
   minuslearn_speaking_mistakes: 'speakingMistakes',
+  minuslearn_academic_calendar: 'academicCalendar',
 };
 
 async function loadValue(key) {

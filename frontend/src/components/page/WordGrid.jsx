@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { WordCard } from './WordCard';
+import { WordMatchingQuiz } from './WordMatchingQuiz';
+import { WordGuessQuiz } from './WordGuessQuiz';
 import { BookOpen, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useRemoteStorage } from '../../hooks/useRemoteStorage';
 
@@ -64,6 +66,31 @@ export function WordGrid({ words, activeTopicId, onAddWord, onEditWord, searchTe
     const term = searchTerm.toLowerCase();
     return w.word.toLowerCase().includes(term) || w.meaning.toLowerCase().includes(term);
   });
+
+  if (viewMode === 'match') {
+    return (
+      <div className="p-md md:p-xxl flex-1">
+        <WordMatchingQuiz
+          words={filteredWords}
+          settings={settings}
+          onAddWord={onAddWord}
+        />
+      </div>
+    );
+  }
+
+  if (viewMode === 'guess') {
+    return (
+      <div className="p-md md:p-xxl flex-1">
+        <WordGuessQuiz
+          words={filteredWords}
+          allWords={words}
+          settings={settings}
+          onAddWord={onAddWord}
+        />
+      </div>
+    );
+  }
 
   const totalPages = Math.ceil(filteredWords.length / itemsPerPage);
   const currentWords = filteredWords.slice(

@@ -234,9 +234,19 @@ function LearningApp() {
 
   const handleDeleteVideoVocabulary = useCallback(wordId => setWords(currentWords => currentWords.filter(word => word.id !== wordId)), [setWords]);
 
+  const [examMode, setExamMode] = useState('calendar'); // 'calendar' | 'custom'
+
+  const shouldHideSidebar =
+    activePage === 'bilingual-video' ||
+    activePage === 'video-detail' ||
+    (activePage === 'exam' && examMode === 'calendar');
+
   return (
     <div className="flex flex-col h-screen w-full overflow-hidden">
       <TopNavBar
+        words={words}
+        topics={topics}
+        srData={srData}
         wordCount={words.length}
         activePage={activePage}
         setActivePage={setActivePage}
@@ -245,7 +255,7 @@ function LearningApp() {
       />
 
       <div className="flex flex-1 overflow-hidden relative">
-        {activePage !== 'bilingual-video' && activePage !== 'video-detail' && (
+        {!shouldHideSidebar && (
           <Sidebar
             isDrawerOpen={isDrawerOpen}
             setIsDrawerOpen={setIsDrawerOpen}
@@ -302,6 +312,22 @@ function LearningApp() {
                       title="Flashcard View"
                     >
                       <span className="material-symbols-outlined text-[18px]">style</span>
+                    </button>
+                    <button
+                      onClick={() => setViewMode('match')}
+                      className={`px-3 py-1.5 rounded-[6px] flex items-center justify-center gap-1 transition-all ${viewMode === 'match' ? 'bg-surface shadow-sm text-primary font-medium' : 'text-on-surface-variant hover:text-on-surface'}`}
+                      title="Quiz Nối từ"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">extension</span>
+                      <span className="text-xs font-button hidden sm:inline">Nối từ</span>
+                    </button>
+                    <button
+                      onClick={() => setViewMode('guess')}
+                      className={`px-3 py-1.5 rounded-[6px] flex items-center justify-center gap-1 transition-all ${viewMode === 'guess' ? 'bg-surface shadow-sm text-primary font-medium' : 'text-on-surface-variant hover:text-on-surface'}`}
+                      title="Quiz Đoán từ (Lá bài)"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">help</span>
+                      <span className="text-xs font-button hidden sm:inline">Đoán từ</span>
                     </button>
                   </div>
 
@@ -384,6 +410,8 @@ function LearningApp() {
                 settings={settings}
                 setSrData={setSrData}
                 onOpenSettings={() => setIsSettingsModalOpen(true)}
+                examMode={examMode}
+                setExamMode={setExamMode}
               />
             </div>
           ) : activePage === 'review' ? (

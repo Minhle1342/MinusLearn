@@ -2,8 +2,9 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   CheckCircle2, XCircle, Volume2, Mic, Square, RotateCcw,
   ClipboardCheck, Headphones, BookOpen, MessageSquare, Loader2, ChevronRight, ChevronLeft, Lightbulb,
-  PenLine, Clock3, FileText, AlertTriangle, Trophy
+  PenLine, Clock3, FileText, AlertTriangle, Trophy, Calendar as CalendarIcon, Sliders
 } from 'lucide-react';
+import { AcademicExamCalendar } from './AcademicExamCalendar';
 import {
   evaluateExamWritingSubmission,
   generateExamContent,
@@ -51,8 +52,21 @@ function getSpeakerStyles(speakerName) {
   return SPEAKER_COLORS[index];
 }
 
-export function ExamPage({ words, activeTopicId, topics, settings, setSrData, onOpenSettings }) {
-  // ── Phase management ──
+export function ExamPage({
+  words,
+  activeTopicId,
+  topics,
+  settings,
+  setSrData,
+  onOpenSettings,
+  examMode: propExamMode,
+  setExamMode: propSetExamMode
+}) {
+  // ── Mode & Phase management ──
+  const [localExamMode, setLocalExamMode] = useState('calendar');
+  const examMode = propExamMode !== undefined ? propExamMode : localExamMode;
+  const setExamMode = propSetExamMode || setLocalExamMode;
+  const [activeAcademicMilestone, setActiveAcademicMilestone] = useState(null);
   const [phase, setPhase] = useState('setup'); // setup | loading | listening | speaking | reading | results
   const [examData, setExamData] = useState(null);
   const [error, setError] = useState('');
@@ -237,6 +251,102 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
     const timer = setInterval(persistDraft, 10000);
     return () => clearInterval(timer);
   }, [phase]);
+
+  // ═══════════════════════════════════════
+  //  ACADEMIC CALENDAR EXAM HANDLER
+  // ═══════════════════════════════════════
+  const handleStartAcademicExam = async (milestone) => {
+    if (!settings.apiKey || !settings.model) {
+      setError('Vui lòng cấu hình API Key và model trong Cài đặt trước khi tạo bài kiểm tra.');
+      return;
+    }
+    setActiveAcademicMilestone(milestone);
+    const targetDifficulty = milestone.difficulty || 'Trung bình';
+    setDifficulty(targetDifficulty);
+
+    const targetTopicIds = milestone.topicIds || [];
+    const targetWords = targetTopicIds.length > 0
+      ? words.filter(w => targetTopicIds.includes(w.topicId))
+      : words;
+    const examWords = (targetWords.length > 0 ? targetWords : words).map(w => ({
+      word: w.word,
+      meaning: w.meaning,
+      example: w.example
+    }));
+
+    setPhase('loading');
+    setError('');
+    hasSavedResult.current = false;
+    setRetakeRecordId(null);
+    setHasPlayedDialogue(false);
+
+    try {
+      const topicName = targetTopicIds.length > 0
+        ? (topics.filter(t => targetTopicIds.includes(t.id)).map(t => t.name).join(', ') || 'Tổng hợp')
+        : 'Tổng hợp';
+
+      const [baseExamData, writingData] = await Promise.all([
+        generateExamContent(examWords, settings.apiKey, settings.model, targetDifficulty),
+        includeWritingTest
+          ? generateExamWritingContent({
+              wordList: examWords,
+              topicName,
+              difficulty: targetDifficulty,
+            }, settings.apiKey, settings.model)
+          : Promise.resolve(null),
+      ]);
+
+      const data = writingData ? { ...baseExamData, writing: writingData } : baseExamData;
+      setExamData(data);
+      deleteExamWritingDraft().catch(error => console.error('Không thể xóa draft bài thi:', error));
+
+      const voices = getEnglishVoices();
+      const listeningSpeakers = (data.listening?.dialogue || []).map(d => d.speaker);
+      const speakingSpeakers = (data.speaking?.dialogue || [])
+        .filter(d => !d.isUserTurn)
+        .map(d => d.speaker);
+      const npcSpeakers = [...new Set([...listeningSpeakers, ...speakingSpeakers])];
+      const shuffledVoices = [...voices].sort(() => 0.5 - Math.random());
+      const map = {};
+      npcSpeakers.forEach((speaker, i) => {
+        if (shuffledVoices.length > 0) {
+          map[speaker] = shuffledVoices[i % shuffledVoices.length].voiceURI;
+        }
+      });
+      setSpeakerVoiceMap(map);
+
+      setCurrentDialogueLine(0);
+      setListeningStep('dialogue');
+      setListeningAnswers([]);
+      setListeningSelectedOption(null);
+      setCurrentListeningQ(0);
+      setShowDialogue(false);
+      setCurrentSpeakingLine(0);
+      setLiveTranscript('');
+      setSpeakingResult(null);
+      setSpeakingResults([]);
+      setSpeakingError('');
+      setCurrentReadingQ(0);
+      setReadingAnswers([]);
+      setReadingSelectedOption(null);
+      setReadingInputValue('');
+      setReadingInputSubmitted(false);
+      setReadingInputIsCorrect(false);
+      setShowReadingHint(false);
+      setReadingExplanation(null);
+      setWritingTaskIndex(0);
+      setWritingAnswers(['', '']);
+      setWritingTimeLeft(EXAM_WRITING_TOTAL_SECONDS);
+      setIsWritingLocked(false);
+      setWritingEvaluation(null);
+      setWritingSubmitError('');
+      setPhase('listening');
+    } catch (err) {
+      console.error(err);
+      setError(err.message || 'Không thể tạo bài kiểm tra từ Lịch. Vui lòng thử lại.');
+      setPhase('setup');
+    }
+  };
 
   // ═══════════════════════════════════════
   //  SETUP PHASE
@@ -711,6 +821,40 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
       hasSavedResult.current = true;
 
       const persistResult = async () => {
+        if (activeAcademicMilestone) {
+          try {
+            const rawCal = localStorage.getItem('minuslearn_academic_calendar');
+            if (rawCal) {
+              const currentCal = JSON.parse(rawCal);
+              if (currentCal && currentCal.milestones) {
+                const updatedMs = currentCal.milestones.map(ms => {
+                  if (ms.id === activeAcademicMilestone.id) {
+                    return {
+                      ...ms,
+                      status: 'completed',
+                      result: {
+                        score: totalScore,
+                        totalQuestions: (examData?.listening?.questions?.length || 0) + (examData?.reading?.questions?.length || 0),
+                        listeningScore,
+                        speakingScore,
+                        readingScore,
+                        timestamp: Date.now()
+                      }
+                    };
+                  }
+                  return ms;
+                });
+                localStorage.setItem('minuslearn_academic_calendar', JSON.stringify({
+                  ...currentCal,
+                  milestones: updatedMs
+                }));
+              }
+            }
+          } catch (err) {
+            console.error('Không thể lưu kết quả bài thi Lịch 6 tháng:', err);
+          }
+        }
+
         if (!retakeRecordId) {
           await saveExamResult({
             difficulty,
@@ -729,7 +873,7 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
       };
       persistResult().catch(error => console.error('Không thể lưu kết quả bài thi:', error));
     }
-  }, [phase, difficulty, totalScore, listeningScore, speakingScore, readingScore, writingEvaluation, retakeRecordId, examData, activeTopicId, setupLeaderboardTab]);
+  }, [phase, difficulty, totalScore, listeningScore, speakingScore, readingScore, writingEvaluation, retakeRecordId, examData, activeTopicId, setupLeaderboardTab, activeAcademicMilestone]);
 
   // ═══════════════════════════════════════
   //  RENDER
@@ -738,22 +882,53 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
   // ── SETUP ──
   if (phase === 'setup') {
     return (
-      <div className="min-h-full flex items-stretch p-lg md:p-xl gap-xl transition-all duration-300 relative">
-        <div className={`bg-surface border border-hairline rounded-[16px] p-[40px] shadow-sm flex flex-col items-center text-center transition-all duration-300 ${showSetupLeaderboard ? 'w-2/3' : 'max-w-2xl mx-auto w-full'}`}>
-          <div className="w-24 h-24 mb-md mx-auto rounded-full bg-surface-container-low flex items-center justify-center">
-            <ClipboardCheck size={48} className="text-primary" />
-          </div>
+      <div className="min-h-full flex flex-col items-center p-md md:p-xl gap-md transition-all duration-300 relative w-full">
+        {/* Mode Switcher Bar */}
+        <div className="flex bg-surface-container-low p-1.5 rounded-full border border-hairline shadow-xs mb-sm">
+          <button
+            onClick={() => setExamMode('calendar')}
+            className={`px-lg py-2 rounded-full font-button text-sm transition-all flex items-center gap-2 ${
+              examMode === 'calendar' ? 'bg-primary text-on-primary shadow-sm' : 'text-on-surface-variant hover:text-on-surface'
+            }`}
+          >
+            <CalendarIcon size={18} />
+            Lịch Kiểm Tra Năm Học (6 Tháng)
+          </button>
+          <button
+            onClick={() => setExamMode('custom')}
+            className={`px-lg py-2 rounded-full font-button text-sm transition-all flex items-center gap-2 ${
+              examMode === 'custom' ? 'bg-primary text-on-primary shadow-sm' : 'text-on-surface-variant hover:text-on-surface'
+            }`}
+          >
+            <Sliders size={18} />
+            Thi Nhanh Tùy Chỉnh
+          </button>
+        </div>
 
-          <h2 className="font-display-2 text-display-2 text-ink mb-sm tracking-tight">Kiểm tra tổng hợp</h2>
-          <p className="font-body-md text-body-md text-ink-muted mb-xl">
-            Chọn chủ đề bạn muốn kiểm tra. Gemini sẽ tạo bài kiểm tra 3 phần: Nghe, Nói, Đọc-hiểu.
-          </p>
+        {examMode === 'calendar' ? (
+          <AcademicExamCalendar
+            topics={topics}
+            words={words}
+            settings={settings}
+            onStartExam={handleStartAcademicExam}
+          />
+        ) : (
+          <div className="w-full flex items-stretch gap-xl">
+            <div className={`bg-surface border border-hairline rounded-[16px] p-[40px] shadow-sm flex flex-col items-center text-center transition-all duration-300 ${showSetupLeaderboard ? 'w-2/3' : 'max-w-2xl mx-auto w-full'}`}>
+              <div className="w-24 h-24 mb-md mx-auto rounded-full bg-surface-container-low flex items-center justify-center">
+                <ClipboardCheck size={48} className="text-primary" />
+              </div>
 
-          {error && (
-            <div className="w-full bg-error-container text-on-error-container border border-error/20 rounded-[12px] p-md mb-lg font-body-sm text-body-sm text-left">
-              {error}
-            </div>
-          )}
+              <h2 className="font-display-2 text-display-2 text-ink mb-sm tracking-tight">Kiểm tra tùy chỉnh</h2>
+              <p className="font-body-md text-body-md text-ink-muted mb-xl">
+                Chọn chủ đề bạn muốn kiểm tra. Gemini sẽ tạo bài kiểm tra 3 phần: Nghe, Nói, Đọc-hiểu.
+              </p>
+
+              {error && (
+                <div className="w-full bg-error-container text-on-error-container border border-error/20 rounded-[12px] p-md mb-lg font-body-sm text-body-sm text-left">
+                  {error}
+                </div>
+              )}
 
           <div className="w-full text-left mb-xl bg-canvas-soft p-lg rounded-[12px] border border-hairline">
             <label className="block font-eyebrow text-eyebrow text-primary uppercase mb-sm tracking-wide">
@@ -915,6 +1090,8 @@ export function ExamPage({ words, activeTopicId, topics, settings, setSrData, on
         >
           {showSetupLeaderboard ? <ChevronRight size={24} /> : <ChevronLeft size={24} />}
         </button>
+          </div>
+        )}
       </div>
     );
   }
