@@ -10,6 +10,11 @@ if not exist "%ROOT%backend\.venv\Scripts\python.exe" (
   exit /b 1
 )
 
+:: Ensure icon & shortcut created for start.bat
+if exist "%ROOT%generate_shortcut.ps1" (
+  powershell -ExecutionPolicy Bypass -File "%ROOT%generate_shortcut.ps1" >nul 2>&1
+)
+
 start "MinusLearn API" cmd /k "cd /d ""%ROOT%backend"" && .venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000"
 cd /d "%ROOT%frontend"
 npm run dev -- --open

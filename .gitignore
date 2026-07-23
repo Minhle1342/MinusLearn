@@ -15,8 +15,13 @@
 node_modules/
 frontend/node_modules/
 .venv/
+backend/.venv/
 __pycache__/
 *.py[cod]
+
+# Generated local shortcuts & icons
+*.lnk
+icon.ico
 
 # Build outputs
 dist/
