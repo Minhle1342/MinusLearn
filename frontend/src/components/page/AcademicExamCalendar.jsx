@@ -139,6 +139,29 @@ export function AcademicExamCalendar({ topics, words, settings, onStartExam }) {
     return academicData.milestones.filter(ms => ms.status === 'completed' && ms.result);
   }, [academicData]);
 
+  // Next upcoming exam calculation
+  const nextUpcomingExam = useMemo(() => {
+    if (!academicData || !academicData.milestones) return null;
+    return academicData.milestones.find(ms => ms.status !== 'completed');
+  }, [academicData]);
+
+  const daysToNextExam = useMemo(() => {
+    if (!nextUpcomingExam) return null;
+    
+    // Parse the date (YYYY-MM-DD)
+    const [y, m, d] = nextUpcomingExam.date.split('-').map(Number);
+    const examDate = new Date(y, m - 1, d);
+    examDate.setHours(0, 0, 0, 0);
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const diffTime = examDate.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    return diffDays;
+  }, [nextUpcomingExam]);
+
   return (
     <div className="flex flex-col max-w-6xl mx-auto w-full p-md md:p-lg gap-lg">
       {/* Page Header */}
@@ -188,6 +211,50 @@ export function AcademicExamCalendar({ topics, words, settings, onStartExam }) {
           </button>
         </div>
       </div>
+
+      {/* Next Exam Countdown Banner */}
+      {activeTab === 'calendar' && nextUpcomingExam && daysToNextExam !== null && (
+        <div 
+          onClick={() => {
+            setSelectedMilestone(nextUpcomingExam);
+            const [y, m, d] = nextUpcomingExam.date.split('-').map(Number);
+            setCurrentMonthDate(new Date(y, m - 1, d));
+            window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+          }}
+          className={`p-md md:p-lg rounded-[20px] border shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-md cursor-pointer transition-transform hover:-translate-y-1 ${
+          daysToNextExam <= 0 ? 'bg-amber-500/10 border-amber-500/30 hover:bg-amber-500/20' : 'bg-primary/5 border-primary/20 hover:bg-primary/10'
+        }`}>
+          <div className="flex items-center gap-md">
+            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 ${
+              daysToNextExam <= 0 ? 'bg-amber-500/20 text-amber-600' : 'bg-primary/10 text-primary'
+            }`}>
+              <Clock size={24} />
+            </div>
+            <div>
+              <h3 className={`font-heading-2 text-lg ${daysToNextExam <= 0 ? 'text-amber-700 dark:text-amber-400' : 'text-primary'}`}>
+                {daysToNextExam < 0 ? 'Có bài kiểm tra đang bị trễ!' : daysToNextExam === 0 ? 'Hôm nay có bài kiểm tra!' : 'Bài kiểm tra sắp tới'}
+              </h3>
+              <p className="text-sm text-on-surface-variant mt-0.5">
+                <strong className="text-on-surface">{nextUpcomingExam.title}</strong>
+                <span className="mx-2">•</span>
+                Ngày thi: <strong className="text-on-surface">{nextUpcomingExam.date}</strong>
+              </p>
+            </div>
+          </div>
+          
+          <div className={`px-xl py-sm rounded-2xl font-heading-2 text-xl text-center border whitespace-nowrap min-w-[140px] ${
+             daysToNextExam < 0 ? 'bg-rose-500/10 text-rose-600 border-rose-500/20' 
+             : daysToNextExam === 0 ? 'bg-amber-500/10 text-amber-600 border-amber-500/20 animate-pulse'
+             : 'bg-surface text-primary border-hairline shadow-sm'
+          }`}>
+            {daysToNextExam < 0 
+              ? `Trễ ${Math.abs(daysToNextExam)} ngày` 
+              : daysToNextExam === 0 
+                ? 'Hôm nay' 
+                : `Còn ${daysToNextExam} ngày`}
+          </div>
+        </div>
+      )}
 
       {/* Multi-Topic Binding Bar */}
       <div className="bg-surface border border-hairline rounded-[16px] p-md shadow-sm flex flex-col gap-sm">
