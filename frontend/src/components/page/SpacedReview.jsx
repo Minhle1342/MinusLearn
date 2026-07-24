@@ -35,12 +35,17 @@ export function SpacedReview({ words, activeTopicId, topics, srData, setSrData, 
   const stats = useMemo(() => {
     const wordIds = topicWords.map(w => w.id);
     const { dueWords, newWords, learnedWords } = getDueWords(srData, wordIds);
+    
+    // Giới hạn tối đa 20 từ mới mỗi phiên để tránh quá tải
+    const limitedNewWords = newWords.slice(0, 20);
+    
     return {
       total: wordIds.length,
       due: dueWords.length,
-      newCount: newWords.length,
+      newCount: limitedNewWords.length,
       learned: learnedWords.length,
-      dueIds: [...dueWords, ...newWords], // both due and new are reviewable
+      dueIds: [...dueWords, ...limitedNewWords], // both due and new are reviewable
+      remainingNew: Math.max(0, newWords.length - 20),
     };
   }, [topicWords, srData]);
 
@@ -117,13 +122,29 @@ export function SpacedReview({ words, activeTopicId, topics, srData, setSrData, 
   const handleRate = (quality) => {
     if (!currentWord) return;
 
-    // Calculate new SR state
-    const newState = calculateSM2(
-      quality,
-      currentSR.repetition,
-      currentSR.efactor,
-      currentSR.interval
-    );
+    const isEverForgot = sessionResults.some(r => r.wordId === currentWord.id && r.quality < 3);
+
+    let newState;
+    if (isEverForgot) {
+      // Trong giai đoạn học lại (đã quên trước đó trong cùng phiên)
+      // Bỏ qua SM-2 để tránh bị trừ efactor nhiều lần (double penalty).
+      // Bất kể chọn mức nào >= 3, thẻ đều sẽ được hẹn lại vào ngày mai (interval = 1).
+      newState = {
+        ...currentSR,
+        repetition: quality < 3 ? 0 : 1,
+        interval: 1, 
+        nextReviewDate: Date.now() + 1 * 24 * 60 * 60 * 1000,
+        lastReviewDate: Date.now()
+      };
+    } else {
+      // Tính toán SM-2 bình thường cho lần trả lời đầu tiên
+      newState = calculateSM2(
+        quality,
+        currentSR.repetition,
+        currentSR.efactor,
+        currentSR.interval
+      );
+    }
 
     // Persist to srData
     setSrData(prev => ({
@@ -140,8 +161,15 @@ export function SpacedReview({ words, activeTopicId, topics, srData, setSrData, 
       newInterval: newState.interval,
     }]);
 
+    const isForgot = quality < 3;
+    if (isForgot) {
+      // Re-add to the end of the queue so user has to review it again this session
+      setReviewQueue(prev => [...prev, currentWord]);
+    }
+
     // Move to next or finish
-    if (currentIndex + 1 < reviewQueue.length) {
+    // We add 1 to reviewQueue.length if we just appended a word
+    if (currentIndex + 1 < reviewQueue.length + (isForgot ? 1 : 0)) {
       setCurrentIndex(currentIndex + 1);
       setIsFlipped(false);
     } else {
@@ -152,21 +180,42 @@ export function SpacedReview({ words, activeTopicId, topics, srData, setSrData, 
   // Preview intervals for the 4 rating buttons
   const previewIntervals = useMemo(() => {
     if (!currentWord) return {};
+    
+    const isEverForgot = sessionResults.some(r => r.wordId === currentWord.id && r.quality < 3);
+    if (isEverForgot) {
+      // Nếu đang trong vòng lặp học lại, mọi lựa chọn đều đưa về interval = 1 (ngày mai)
+      return { 0: 1, 3: 1, 4: 1, 5: 1 };
+    }
+
     return {
       0: previewInterval(0, currentSR.repetition, currentSR.efactor, currentSR.interval),
       3: previewInterval(3, currentSR.repetition, currentSR.efactor, currentSR.interval),
       4: previewInterval(4, currentSR.repetition, currentSR.efactor, currentSR.interval),
       5: previewInterval(5, currentSR.repetition, currentSR.efactor, currentSR.interval),
     };
-  }, [currentWord, currentSR]);
+  }, [currentWord, currentSR, sessionResults]);
 
   // --- Phase: SUMMARY ---
   const summaryStats = useMemo(() => {
-    const forgot = sessionResults.filter(r => r.quality < 3);
-    const hard = sessionResults.filter(r => r.quality === 3);
-    const good = sessionResults.filter(r => r.quality === 4);
-    const easy = sessionResults.filter(r => r.quality === 5);
-    return { forgot, hard, good, easy, total: sessionResults.length };
+    // Lọc lấy kết quả CUỐI CÙNG của mỗi từ (vì có thể 1 từ bị lặp lại nhiều lần do Quên)
+    const finalResultsMap = new Map();
+    const everForgot = new Set();
+    
+    sessionResults.forEach(r => {
+      finalResultsMap.set(r.wordId, r);
+      if (r.quality < 3) everForgot.add(r.wordId);
+    });
+    
+    const finalResults = Array.from(finalResultsMap.values());
+    const forgot = finalResults.filter(r => r.quality < 3);
+    const hard = finalResults.filter(r => r.quality === 3);
+    const good = finalResults.filter(r => r.quality === 4);
+    const easy = finalResults.filter(r => r.quality === 5);
+    
+    // Danh sách những từ đã từng bị quên trong phiên học này (để hiển thị lưu ý)
+    const struggledWords = Array.from(everForgot).map(id => sessionResults.find(r => r.wordId === id));
+
+    return { forgot, hard, good, easy, total: finalResults.length, struggledWords };
   }, [sessionResults]);
 
   // Next due date for the "all done" message
@@ -237,10 +286,15 @@ export function SpacedReview({ words, activeTopicId, topics, srData, setSrData, 
               <span className="font-heading-2 text-heading-2 text-red-600">{stats.due}</span>
               <span className="text-body-sm text-on-surface-variant">Cần ôn lại</span>
             </div>
-            <div className="bg-surface border border-hairline rounded-[12px] p-lg flex flex-col items-center gap-xs">
+            <div className="bg-surface border border-hairline rounded-[12px] p-lg flex flex-col items-center gap-xs relative">
               <Sparkles size={20} className="text-amber-500" />
               <span className="font-heading-2 text-heading-2 text-amber-600">{stats.newCount}</span>
               <span className="text-body-sm text-on-surface-variant">Từ mới</span>
+              {stats.remainingNew > 0 && (
+                <span className="absolute top-2 right-2 text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-bold" title="Còn thêm từ mới chờ ôn">
+                  +{stats.remainingNew}
+                </span>
+              )}
             </div>
             <div className="bg-surface border border-hairline rounded-[12px] p-lg flex flex-col items-center gap-xs">
               <CheckCircle2 size={20} className="text-green-500" />
@@ -460,16 +514,16 @@ export function SpacedReview({ words, activeTopicId, topics, srData, setSrData, 
           </div>
 
           {/* Forgot words list */}
-          {summaryStats.forgot.length > 0 && (
+          {summaryStats.struggledWords.length > 0 && (
             <div className="bg-red-50 border border-red-200 rounded-[12px] p-lg mb-lg">
               <h3 className="font-heading-3 text-heading-3 text-red-700 mb-sm">
-                Từ cần ôn lại ({summaryStats.forgot.length})
+                Từ vựng còn yếu ({summaryStats.struggledWords.length})
               </h3>
               <p className="text-body-sm text-red-500 mb-md">
-                Những từ này sẽ xuất hiện lại vào ngày mai.
+                Những từ này bạn đã quên ít nhất 1 lần trong phiên này. Hãy chú ý ôn lại vào ngày mai nhé!
               </p>
               <div className="flex flex-wrap gap-sm">
-                {summaryStats.forgot.map(r => (
+                {summaryStats.struggledWords.map(r => (
                   <span
                     key={r.wordId}
                     className="px-sm py-xs bg-white border border-red-200 rounded-full text-body-sm text-red-700 font-medium"

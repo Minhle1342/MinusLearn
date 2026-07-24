@@ -57,12 +57,40 @@ export function calculateSM2(quality, repetition, efactor, interval) {
     newRepetition = repetition + 1;
 
     if (newRepetition === 1) {
-      newInterval = 1;
+      // Lần lặp đầu tiên (Thẻ mới)
+      if (quality === 5) {
+        newInterval = 4; // Dễ -> Bỏ qua mốc 1 ngày, nhảy lên 4 ngày
+        newRepetition = 2; // Được xem như đã tốt nghiệp mốc 1
+      } else {
+        newInterval = 1; // Khó / Tốt -> 1 ngày
+      }
     } else if (newRepetition === 2) {
-      newInterval = 6;
+      // Lần lặp thứ hai
+      if (quality === 3) {
+        newInterval = 3; // Khó -> Khoảng cách ngắn lại (3 ngày)
+      } else if (quality === 5) {
+        newInterval = 8; // Dễ -> Khoảng cách xa hơn (8 ngày)
+      } else {
+        newInterval = 6; // Tốt -> 6 ngày (Chuẩn SM-2)
+      }
     } else {
-      newInterval = Math.round(interval * efactor);
+      // Các lần lặp sau
+      if (quality === 3) {
+        // Khó -> Chỉ tăng nhẹ interval thêm 20% thay vì nhân với EF
+        newInterval = Math.round(interval * 1.2);
+      } else if (quality === 5) {
+        // Dễ -> Nhân EF mới và cộng thêm 30% bonus
+        newInterval = Math.round(interval * newEF * 1.3);
+      } else {
+        // Tốt -> Nhân EF mới bình thường
+        newInterval = Math.round(interval * newEF);
+      }
     }
+  }
+
+  // Đảm bảo interval luôn tăng lên ít nhất 1 ngày nếu đã trả lời đúng (quality >= 3)
+  if (quality >= 3 && newInterval <= interval) {
+    newInterval = interval + 1;
   }
 
   const now = Date.now();
