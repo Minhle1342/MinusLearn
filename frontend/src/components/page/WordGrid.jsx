@@ -2,6 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { WordCard } from './WordCard';
 import { WordMatchingQuiz } from './WordMatchingQuiz';
 import { WordGuessQuiz } from './WordGuessQuiz';
+import { WordSnakeQuiz } from './WordSnakeQuiz';
+import { WordMemoryMatch } from './WordMemoryMatch';
+import { WordTypingInvaders } from './WordTypingInvaders';
+import { WordRescueAstronaut } from './WordRescueAstronaut';
 import { BookOpen, Plus, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useRemoteStorage } from '../../hooks/useRemoteStorage';
 
@@ -38,12 +42,18 @@ const LazyWordCard = ({ word, onEditWord, viewMode, settings }) => {
   );
 };
 
-export function WordGrid({ words, activeTopicId, onAddWord, onEditWord, searchTerm, viewMode, settings, mistakeFilter }) {
+export function WordGrid({ words, activeTopicId, onAddWord, onEditWord, searchTerm, viewMode, setViewMode, settings, mistakeFilter }) {
   const [listeningMistakes] = useRemoteStorage('minuslearn_mistakes', {});
   const [readingMistakes] = useRemoteStorage('minuslearn_reading_mistakes', {});
   
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 12;
+
+  useEffect(() => {
+    if (setViewMode) {
+      setViewMode('card');
+    }
+  }, [setViewMode]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -86,6 +96,52 @@ export function WordGrid({ words, activeTopicId, onAddWord, onEditWord, searchTe
           words={filteredWords}
           allWords={words}
           settings={settings}
+          onAddWord={onAddWord}
+        />
+      </div>
+    );
+  }
+
+  if (viewMode === 'snake') {
+    return (
+      <div className="p-md md:p-xxl flex-1">
+        <WordSnakeQuiz
+          words={filteredWords}
+          allWords={words}
+          settings={settings}
+          onAddWord={onAddWord}
+        />
+      </div>
+    );
+  }
+
+  if (viewMode === 'memory') {
+    return (
+      <div className="p-md md:p-xxl flex-1">
+        <WordMemoryMatch
+          words={filteredWords}
+          onAddWord={onAddWord}
+        />
+      </div>
+    );
+  }
+
+  if (viewMode === 'invaders') {
+    return (
+      <div className="p-md md:p-xxl flex-1">
+        <WordTypingInvaders
+          words={filteredWords}
+          onAddWord={onAddWord}
+        />
+      </div>
+    );
+  }
+
+  if (viewMode === 'astronaut') {
+    return (
+      <div className="p-md md:p-xxl flex-1">
+        <WordRescueAstronaut
+          words={filteredWords}
           onAddWord={onAddWord}
         />
       </div>

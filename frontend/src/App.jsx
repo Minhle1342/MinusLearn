@@ -297,12 +297,13 @@ function LearningApp() {
                   </select>
                 </div>
 
-                <div className="flex gap-sm w-full md:w-auto items-center">
-                  <div className="flex bg-surface-container-low rounded-[8px] p-1 border border-hairline">
+                <div className="flex gap-sm w-full md:w-auto items-center flex-wrap md:flex-nowrap">
+                  {/* Cụm Chế độ xem (Card view & Flashcard view) */}
+                  <div className="flex bg-surface-container-low rounded-[8px] p-1 border border-hairline" title="Chế độ hiển thị">
                     <button
                       onClick={() => setViewMode('card')}
                       className={`px-3 py-1.5 rounded-[6px] flex items-center justify-center transition-all ${viewMode === 'card' ? 'bg-surface shadow-sm text-primary' : 'text-on-surface-variant hover:text-on-surface'}`}
-                      title="Card View"
+                      title="Card View (Thẻ từ dạng lưới)"
                     >
                       <span className="material-symbols-outlined text-[18px]">grid_view</span>
                     </button>
@@ -313,6 +314,10 @@ function LearningApp() {
                     >
                       <span className="material-symbols-outlined text-[18px]">style</span>
                     </button>
+                  </div>
+
+                  {/* Cụm Mini game (Nối từ & Đoán từ & Rắn săn mồi & Lật thẻ) */}
+                  <div className="flex bg-surface-container-low rounded-[8px] p-1 border border-hairline" title="Mini game">
                     <button
                       onClick={() => setViewMode('match')}
                       className={`px-3 py-1.5 rounded-[6px] flex items-center justify-center gap-1 transition-all ${viewMode === 'match' ? 'bg-surface shadow-sm text-primary font-medium' : 'text-on-surface-variant hover:text-on-surface'}`}
@@ -328,6 +333,38 @@ function LearningApp() {
                     >
                       <span className="material-symbols-outlined text-[18px]">help</span>
                       <span className="text-xs font-button hidden sm:inline">Đoán từ</span>
+                    </button>
+                    <button
+                      onClick={() => setViewMode('snake')}
+                      className={`px-3 py-1.5 rounded-[6px] flex items-center justify-center gap-1 transition-all ${viewMode === 'snake' ? 'bg-surface shadow-sm text-primary font-medium' : 'text-on-surface-variant hover:text-on-surface'}`}
+                      title="Game Rắn săn mồi từ vựng"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">sports_esports</span>
+                      <span className="text-xs font-button hidden sm:inline">Rắn săn mồi</span>
+                    </button>
+                    <button
+                      onClick={() => setViewMode('memory')}
+                      className={`px-3 py-1.5 rounded-[6px] flex items-center justify-center gap-1 transition-all ${viewMode === 'memory' ? 'bg-surface shadow-sm text-primary font-medium' : 'text-on-surface-variant hover:text-on-surface'}`}
+                      title="Lật thẻ nhớ (Memory Match)"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">grid_on</span>
+                      <span className="text-xs font-button hidden sm:inline">Lật thẻ</span>
+                    </button>
+                    <button
+                      onClick={() => setViewMode('invaders')}
+                      className={`px-3 py-1.5 rounded-[6px] flex items-center justify-center gap-1 transition-all ${viewMode === 'invaders' ? 'bg-surface shadow-sm text-primary font-medium' : 'text-on-surface-variant hover:text-on-surface'}`}
+                      title="Mưa từ vựng (Typing Invaders)"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">keyboard</span>
+                      <span className="text-xs font-button hidden sm:inline">Gõ từ</span>
+                    </button>
+                    <button
+                      onClick={() => setViewMode('astronaut')}
+                      className={`px-3 py-1.5 rounded-[6px] flex items-center justify-center gap-1 transition-all ${viewMode === 'astronaut' ? 'bg-surface shadow-sm text-primary font-medium' : 'text-on-surface-variant hover:text-on-surface'}`}
+                      title="Cứu hộ (Hangman)"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">rocket_launch</span>
+                      <span className="text-xs font-button hidden sm:inline">Cứu hộ</span>
                     </button>
                   </div>
 
@@ -348,6 +385,7 @@ function LearningApp() {
                     activeTopicId={activeTopicId}
                     searchTerm={searchTerm}
                     viewMode={viewMode}
+                    setViewMode={setViewMode}
                     settings={settings}
                     mistakeFilter={mistakeFilter}
                     onAddWord={() => { setWordToEdit(null); setInitialAiText(''); setIsWordModalOpen(true); }}
