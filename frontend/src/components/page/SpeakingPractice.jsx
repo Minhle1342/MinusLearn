@@ -20,8 +20,11 @@ import {
 } from '../../services/speechAssessment';
 import { useRemoteStorage } from '../../hooks/useRemoteStorage';
 import { speakEnglishText, getEnglishVoices, getSelectedEnglishVoice } from '../../utils/speech';
-import { generateSpeakingScenario, chatWithNPC, evaluateSpeakingPractice } from '../../services/api';
+import { evaluateSpeakingPractice } from '../../services/api';
+import { chatWithMascot } from '../../services/mascotApi';
 import { recordReview } from '../../utils/spacedRepetition';
+import { setLearningAudioFocus } from '../../utils/audioFocus';
+import { useMascot } from '../mascot/MascotProvider';
 
 const EMOTION_EMOJIS = {
   happy: '😊',
@@ -31,6 +34,10 @@ const EMOTION_EMOJIS = {
   neutral: '😐',
   excited: '🤩',
   confused: '😕'
+};
+
+const MINO_EMOTION_COLUMNS = {
+  neutral: 0, happy: 1, excited: 2, thinking: 3, confused: 4, concerned: 5, proud: 6,
 };
 
 function shuffleWords(words) {
@@ -61,6 +68,7 @@ function getSpeakerStyles(speakerName) {
 }
 
 export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpenSettings, setSrData }) {
+  const { emitMascotEvent } = useMascot();
   const [phase, setPhase] = useState('setup');
   const [practiceMode, setPracticeMode] = useState('read'); // 'read' or 'ai'
   
@@ -95,6 +103,17 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
   );
   const hasSpeechRecognition = hasSpeechRecognitionSupport();
   const currentWord = practiceQueue[currentIndex];
+
+  useEffect(() => {
+    setLearningAudioFocus('speaking-microphone', isRecording);
+    return () => setLearningAudioFocus('speaking-microphone', false);
+  }, [isRecording]);
+
+  useEffect(() => {
+    if (phase === 'results' || phase === 'ai_results') {
+      emitMascotEvent({ type: 'activity_completed', detail: `speaking: ${phase}` });
+    }
+  }, [emitMascotEvent, phase]);
 
   const topicMistakes = useMemo(
     () => speakableWords.filter(word => speakingMistakes[word.id]),
@@ -152,26 +171,30 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
       setErrorMessage('');
       
       try {
-        const scenario = await generateSpeakingScenario(
-          topicWords, 
-          currentTopic?.name || 'General', 
-          settings.apiKey, 
-          settings.model
+        const topicName = currentTopic?.name || 'General';
+        const scenario = await chatWithMascot(
+          `Start a natural English role-play about ${topicName}. You are Mino. Set the scene briefly and say the first line in English.`,
+          'event',
+          {
+            activePage: 'speaking',
+            topicId: activeTopicId,
+            event: { type: 'roleplay_start', detail: `Topic: ${topicName}` },
+          },
         );
         
         const voices = getEnglishVoices();
         const shuffledVoices = [...voices].sort(() => 0.5 - Math.random());
         if (shuffledVoices.length > 0) {
           setSpeakerVoiceMap({
-            [scenario.npc_name || 'AI']: shuffledVoices[0].voiceURI
+            Mino: shuffledVoices[0].voiceURI
           });
         }
 
-        setAiSituation(scenario.situation);
+        setAiSituation(`Role-play cùng Mino về chủ đề ${topicName}`);
         setAiChatHistory([{
-          speaker: scenario.npc_name || 'AI',
-          text: scenario.npc_first_line,
-          emotion: scenario.npc_first_emotion || 'neutral',
+          speaker: 'Mino',
+          text: scenario.text,
+          emotion: scenario.emotion || 'neutral',
           isUserTurn: false
         }]);
         
@@ -179,7 +202,7 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
         
         // Auto play first line
         setTimeout(() => {
-          speakDialogueLine({ text: scenario.npc_first_line, speaker: scenario.npc_name || 'AI' });
+          speakDialogueLine({ text: scenario.text, speaker: 'Mino' });
         }, 500);
       } catch (err) {
         setErrorMessage(err.message || 'Lỗi tạo tình huống. Hãy thử lại.');
@@ -238,6 +261,15 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
   const handleNext = () => {
     const currentEntry = sessionResults[sessionResults.length - 1];
     if (currentEntry) {
+      if (!currentEntry.isPass) {
+        emitMascotEvent({
+          type: 'speaking_transcript_mismatch',
+          question: currentEntry.word.example,
+          userAnswer: currentEntry.transcript,
+          correctAnswer: currentEntry.word.example,
+          detail: 'Transcript comparison only; no acoustic phoneme analysis.',
+        });
+      }
       setSpeakingMistakes(prev => {
         const next = { ...prev };
         if (currentEntry.isPass) {
@@ -311,16 +343,19 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
       setLiveTranscript('');
       setIsWaitingForAI(true);
       
-      // Call AI to get next line, mapping properties to standard roles
-      const recentHistory = newHistory.slice(-4).map(msg => ({
-        role: msg.isUserTurn ? 'user' : 'model',
-        parts: [{ text: msg.text }]
-      }));
-      
-      const reply = await chatWithNPC(recentHistory, settings.apiKey, settings.model);
+      const recentHistory = newHistory.slice(-4).map(msg => `${msg.speaker}: ${msg.text}`).join('\n');
+      const reply = await chatWithMascot(
+        result.transcript,
+        'event',
+        {
+          activePage: 'speaking',
+          topicId: activeTopicId,
+          event: { type: 'roleplay_turn', detail: recentHistory },
+        },
+      );
       
       const nextNpcMessage = {
-        speaker: aiChatHistory[0]?.speaker || 'AI',
+        speaker: 'Mino',
         text: reply.text,
         emotion: reply.emotion || 'neutral',
         isUserTurn: false
@@ -364,6 +399,7 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
     return new Promise(resolve => {
       if (!window.speechSynthesis) { resolve(); return; }
       window.speechSynthesis.cancel();
+      setLearningAudioFocus('speaking-dialogue', true);
       const utterance = new SpeechSynthesisUtterance(line.text);
       const voice = getSelectedEnglishVoice(speakerVoiceMap[line.speaker] || settings?.speechVoiceURI);
       if (voice) {
@@ -373,8 +409,12 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
         utterance.lang = 'en-US';
       }
       utterance.rate = rate;
-      utterance.onend = resolve;
-      utterance.onerror = resolve;
+      const finish = () => {
+        setLearningAudioFocus('speaking-dialogue', false);
+        resolve();
+      };
+      utterance.onend = finish;
+      utterance.onerror = finish;
       window.speechSynthesis.speak(utterance);
     });
   };
@@ -451,7 +491,7 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
                     : 'text-ink hover:bg-surface-container-low'
                 }`}
               >
-                Trò chuyện với AI
+                Trò chuyện với Mino
               </button>
             </div>
 
@@ -473,7 +513,7 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
             
             {practiceMode === 'ai' && (
               <p className="font-body-sm text-body-sm text-ink-muted">
-                AI sẽ tạo tình huống ngẫu nhiên để bạn trò chuyện tự do. Ở cuối buổi, AI sẽ đóng vai gia sư và nhận xét phát âm, ngữ pháp của bạn.
+                Mino sẽ tạo tình huống theo chủ đề để bạn trò chuyện tự do bằng tiếng Anh. Nhận xét cuối buổi chỉ dựa trên transcript được nhận diện.
               </p>
             )}
           </div>
@@ -532,7 +572,7 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
       <div className="min-h-full flex flex-col items-center justify-center p-xl">
         <Loader2 size={64} className="text-primary animate-spin mb-xl" />
         <h2 className="font-heading-2 text-heading-2 text-ink mb-sm">Đang tạo tình huống...</h2>
-        <p className="font-body-md text-body-md text-ink-muted">AI đang chuẩn bị một kịch bản giao tiếp cho chủ đề {currentTopic?.name}.</p>
+        <p className="font-body-md text-body-md text-ink-muted">Mino đang chuẩn bị một kịch bản giao tiếp cho chủ đề {currentTopic?.name}.</p>
       </div>
     );
   }
@@ -556,7 +596,7 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
         <div className="w-full max-w-3xl mb-lg">
           <div className="flex items-center gap-sm mb-md">
             <div className="px-md py-xs rounded-full bg-accent-pink/10 text-accent-pink font-button text-button flex items-center gap-xs">
-              <MessageSquare size={16} /> Luyện nói với AI
+              <MessageSquare size={16} /> Luyện nói với Mino
             </div>
             <div className="flex-1 h-px bg-hairline" />
             <span className="font-eyebrow text-eyebrow text-ink-muted">Chat</span>
@@ -590,13 +630,10 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
               } else {
                 return (
                   <div key={idx} className="flex justify-start items-start gap-sm animate-in slide-in-from-bottom-2 duration-300">
-                    <div className={`relative w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 border shadow-sm ${styles.bg} ${styles.border} overflow-hidden`}>
-                      <span className={`font-bold text-sm ${styles.text}`}>{item.speaker?.[0]}</span>
-                      <img 
-                        src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(item.speaker)}`} 
-                        alt={item.speaker} 
-                        className="absolute inset-0 w-full h-full object-cover"
-                        onError={(e) => { e.target.style.display = 'none'; }}
+                    <div className={`relative h-12 w-8 flex-shrink-0 ${styles.text}`} aria-label="Mino">
+                      <span
+                        className="mino-sprite"
+                        style={{ backgroundPosition: `${(MINO_EMOTION_COLUMNS[item.emotion] || 0) * (100 / 6)}% 0%` }}
                       />
                     </div>
                     <div className="flex flex-col items-start max-w-[70%]">
@@ -641,13 +678,13 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
           {/* Bottom Messenger-like Input/Mic Bar */}
           <div className="w-full bg-surface-container-low border border-hairline rounded-[24px] p-xs flex items-center gap-md shadow-sm">
             
-            {/* NPC Voice reading buttons */}
+            {/* Mino voice replay */}
             {lastNpcLine && (
               <div className="flex items-center gap-xs">
                 <button
                   onClick={() => speakDialogueLine(lastNpcLine)}
                   className="p-sm bg-primary/10 hover:bg-primary/20 text-primary rounded-full transition-colors"
-                  title="Nghe NPC đọc"
+                  title="Nghe Mino đọc"
                 >
                   <Volume2 size={20} />
                 </button>
@@ -662,7 +699,7 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
                   Đang ghi âm...
                 </span>
               ) : isWaitingForAI ? (
-                <span className="truncate text-ink-faint">Chờ phản hồi từ AI...</span>
+                <span className="truncate text-ink-faint">Chờ phản hồi từ Mino...</span>
               ) : (
                 <span className="truncate">Hãy bấm micro để trò chuyện</span>
               )}

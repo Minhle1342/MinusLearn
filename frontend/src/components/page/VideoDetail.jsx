@@ -5,6 +5,7 @@ import { apiRequest } from '../../services/backendApi';
 import { useVideoLearningState } from '../../hooks/useVideoLearningState';
 import { LearningPlaybackToolbar } from '../video-learning/LearningPlaybackToolbar';
 import { VideoLearningSidebar } from '../video-learning/VideoLearningSidebar';
+import { setLearningAudioFocus } from '../../utils/audioFocus';
 
 const PLAYER_CONFIG = {
   youtube: {
@@ -228,6 +229,11 @@ export function VideoDetail({
   const transcriptPanelRef = useRef(null);
   const transcriptLineRefs = useRef([]);
   const controlsTimerRef = useRef(null);
+
+  useEffect(() => {
+    setLearningAudioFocus('video-playback', isPlaying);
+    return () => setLearningAudioFocus('video-playback', false);
+  }, [isPlaying]);
   const mutedBeforeVietnameseVoiceRef = useRef(false);
   const vietnameseVoiceEnabledRef = useRef(false);
   const vietnameseAudioRef = useRef(null);

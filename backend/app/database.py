@@ -42,7 +42,12 @@ async def create_indexes(database) -> None:
     await database.video_learning_attempts.create_index(
         [("userId", ASCENDING), ("videoId", ASCENDING), ("activity", ASCENDING)]
     )
-    for collection_name in ("study_state", "user_settings", "exam_writing_drafts"):
+    for collection_name in (
+        "study_state",
+        "user_settings",
+        "exam_writing_drafts",
+        "mascot_conversations",
+    ):
         await database[collection_name].create_index("userId", unique=True)
     await database.migration_records.create_index(
         [("userId", ASCENDING), ("backupHash", ASCENDING)], unique=True

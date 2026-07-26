@@ -3,8 +3,10 @@ import { BookOpen, CheckCircle2, XCircle, Loader2, Clock, ChevronRight } from 'l
 import { useRemoteStorage } from '../../hooks/useRemoteStorage';
 import { generateIELTSReadingTest, explainReadingAnswer, explainIeltsReadingAnswer } from '../../services/api';
 import { recordReview } from '../../utils/spacedRepetition';
+import { useMascot } from '../mascot/MascotProvider';
 
 export function ReadingPractice({ words, activeTopicId, topics, settings, setSrData }) {
+  const { emitMascotEvent } = useMascot();
   const [testState, setTestState] = useState('setup'); // setup, playing, results
   const [testMode, setTestMode] = useState('multiple_choice');
   const [wordCount, setWordCount] = useState(10);
@@ -26,6 +28,12 @@ export function ReadingPractice({ words, activeTopicId, topics, settings, setSrD
   const [isFetchingExplanation, setIsFetchingExplanation] = useState({});
 
   const [mistakes, setMistakes] = useRemoteStorage('minuslearn_reading_mistakes', {});
+
+  useEffect(() => {
+    if (testState === 'results') {
+      emitMascotEvent({ type: 'activity_completed', detail: `reading: ${results.length} questions` });
+    }
+  }, [emitMascotEvent, results.length, testState]);
 
   const topicWords = words.filter(w => w.topicId === activeTopicId);
   const currentTopic = topics.find(t => t.id === activeTopicId);
@@ -191,6 +199,12 @@ export function ReadingPractice({ words, activeTopicId, topics, settings, setSrD
     } else {
       showToast(`Sai rồi! Đáp án: ${currentQ.word.word}`, 'error');
       setMistakes({ ...mistakes, [currentQ.word.id]: true });
+      emitMascotEvent({
+        type: 'wrong_answer',
+        question: currentQ.exampleWithBlank,
+        userAnswer: selectedWord.word,
+        correctAnswer: currentQ.word.word,
+      });
     }
 
     const newResults = [...results, {
@@ -243,6 +257,12 @@ export function ReadingPractice({ words, activeTopicId, topics, settings, setSrD
     } else {
       showToast(`Sai rồi! Đáp án: ${currentQ.word.word}`, 'error');
       setMistakes({ ...mistakes, [currentQ.word.id]: true });
+      emitMascotEvent({
+        type: 'wrong_answer',
+        question: currentQ.exampleWithBlank,
+        userAnswer: userInput.trim(),
+        correctAnswer: currentQ.word.word,
+      });
     }
 
     const newResults = [...results, {

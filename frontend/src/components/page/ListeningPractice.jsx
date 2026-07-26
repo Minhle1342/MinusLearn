@@ -4,8 +4,11 @@ import { useRemoteStorage } from '../../hooks/useRemoteStorage';
 import { speakEnglishText } from '../../utils/speech';
 import { generateIELTSListeningTest } from '../../services/api';
 import { recordReview } from '../../utils/spacedRepetition';
+import { setLearningAudioFocus } from '../../utils/audioFocus';
+import { useMascot } from '../mascot/MascotProvider';
 
 export function ListeningPractice({ words, activeTopicId, topics, settings, setSrData }) {
+  const { emitMascotEvent } = useMascot();
   const [testState, setTestState] = useState('setup'); // 'setup', 'playing', 'results'
   const [testMode, setTestMode] = useState('typing'); // 'multiple_choice', 'typing'
   const [wordCount, setWordCount] = useState(10);
@@ -36,6 +39,17 @@ export function ListeningPractice({ words, activeTopicId, topics, settings, setS
   const [mistakes, setMistakes] = useRemoteStorage('minuslearn_mistakes', {});
 
   const inputRef = useRef(null);
+
+  useEffect(() => {
+    setLearningAudioFocus('listening-practice', audioState === 'playing');
+    return () => setLearningAudioFocus('listening-practice', false);
+  }, [audioState]);
+
+  useEffect(() => {
+    if (testState === 'results') {
+      emitMascotEvent({ type: 'activity_completed', detail: `listening: ${results.length} questions` });
+    }
+  }, [emitMascotEvent, results.length, testState]);
 
   const topicWords = words.filter(w => w.topicId === activeTopicId);
   const currentTopic = topics.find(t => t.id === activeTopicId);
@@ -155,20 +169,13 @@ export function ListeningPractice({ words, activeTopicId, topics, settings, setS
       setAudioState('finished');
     };
 
+    setLearningAudioFocus('listening-practice', true);
     window.speechSynthesis.speak(utterance);
   };
 
   const playAnswerSentence = (sentence) => {
     if (!sentence) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(sentence);
-    if (settings?.speechVoiceURI) {
-      const voices = window.speechSynthesis.getVoices();
-      const voice = voices.find(v => v.voiceURI === settings.speechVoiceURI);
-      if (voice) utterance.voice = voice;
-    }
-    utterance.rate = audioRate;
-    window.speechSynthesis.speak(utterance);
+    speakEnglishText(sentence, settings?.speechVoiceURI, { rate: audioRate });
   };
 
   const renderTranscript = () => {
@@ -253,6 +260,12 @@ export function ListeningPractice({ words, activeTopicId, topics, settings, setS
     } else {
       showToast(`Sai rồi! Đáp án: ${currentWord.word}`, 'error');
       setMistakes({ ...mistakes, [currentWord.id]: true });
+      emitMascotEvent({
+        type: 'wrong_answer',
+        question: `Nghe và nhập từ: ${currentWord.meaning || currentWord.example || ''}`,
+        userAnswer: userInput.trim(),
+        correctAnswer: currentWord.word,
+      });
     }
 
     const newResults = [...results, {
@@ -310,6 +323,12 @@ export function ListeningPractice({ words, activeTopicId, topics, settings, setS
     } else {
       showToast(`Sai rồi! Đáp án: ${currentWord.word}`, 'error');
       setMistakes({ ...mistakes, [currentWord.id]: true });
+      emitMascotEvent({
+        type: 'wrong_answer',
+        question: `Nghe và chọn từ: ${currentWord.meaning || currentWord.example || ''}`,
+        userAnswer: selectedOpt.word,
+        correctAnswer: currentWord.word,
+      });
     }
 
     const newResults = [...results, {

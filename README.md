@@ -2,6 +2,37 @@
 
 MinusLearn is an English vocabulary learning website organized by topic. It is designed to help users add new words quickly and review them through multiple practice modes. The current project includes a React + Vite frontend and a lightweight Chrome extension that can send highlighted text into the AI bulk-add flow.
 
+## Mino local learning coach
+
+Mino is the draggable 2D learning companion available across the authenticated app. It can chat, suggest short study missions, react to learning events, and join speaking role-play. Text coaching runs locally through Qwen, while Vietnamese voice and optional two-way voice conversations use Gemini Live. The browser never calls Ollama directly and receives only a short-lived Gemini token from the authenticated backend.
+
+1. Install [Ollama](https://ollama.com/).
+2. Download the local model:
+
+   ```powershell
+   ollama pull qwen2.5:1.5b
+   ```
+
+3. Start Ollama if it is not already running:
+
+   ```powershell
+   ollama serve
+   ```
+
+4. Copy `backend/.env.example` to `backend/.env` and adjust MongoDB/JWT values as needed.
+5. Start the backend and frontend normally. Mino's Settings tab shows whether Ollama and the configured model are available.
+
+To enable Gemini Live voice, set these server-only values in `backend/.env`:
+
+```env
+GEMINI_LIVE_API_KEY=<your-gemini-api-key>
+GEMINI_LIVE_MODEL=gemini-3.1-flash-live-preview
+```
+
+The permanent API key must not be placed in `frontend/.env` or any `VITE_*` variable. The backend exchanges it for a one-use token with a 60-second new-session window. In Mino's chatbox, the microphone button starts or stops the live voice session; Gemini's server-side voice activity detection handles interruption while Mino is speaking.
+
+When Ollama is offline, Mino falls back to deterministic study reminders derived from the current user's due words. It does not perform acoustic pronunciation analysis or provide official IELTS scores.
+
 ## Current features
 
 - Topic-based vocabulary management with a dedicated sidebar for each topic.

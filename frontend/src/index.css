@@ -145,3 +145,196 @@
     @apply bg-outline-variant;
   }
 }
+
+@layer components {
+  .mino-layer {
+    @apply fixed inset-0 pointer-events-none;
+    z-index: 70;
+  }
+
+  .mino-character {
+    @apply absolute flex items-center justify-center border-0 bg-transparent p-0 pointer-events-auto select-none cursor-grab focus:outline-none focus-visible:ring-2 focus-visible:ring-primary;
+    width: 92px;
+    height: 150px;
+    touch-action: none;
+    filter: drop-shadow(0 8px 12px rgb(0 0 0 / 0.18));
+  }
+
+  .mino-character:active {
+    cursor: grabbing;
+  }
+
+  .mino-sprite {
+    display: block;
+    width: 100%;
+    height: 100%;
+    background-image: url('/mascot/mino-sprite.webp');
+    background-repeat: no-repeat;
+    background-size: 700% 200%;
+    animation: mino-float 3.2s ease-in-out infinite;
+  }
+
+  .mino-character-thinking .mino-sprite {
+    animation: mino-think 1.8s ease-in-out infinite;
+  }
+
+  .mino-character-excited .mino-sprite,
+  .mino-character-proud .mino-sprite {
+    animation: mino-hop 0.8s ease-in-out infinite;
+  }
+
+  .mino-character-confused .mino-sprite {
+    animation: mino-confused 1.5s ease-in-out infinite;
+  }
+
+  .mino-bubble {
+    @apply fixed bottom-[172px] max-w-[min(290px,calc(100vw-32px))] rounded-[8px] border border-hairline bg-surface px-md py-sm text-left text-body-sm leading-5 text-on-surface shadow-lg pointer-events-auto;
+  }
+
+  .mino-bubble::after {
+    content: '';
+    position: absolute;
+    bottom: -7px;
+    width: 12px;
+    height: 12px;
+    background: var(--color-surface);
+    border-right: 1px solid var(--color-hairline);
+    border-bottom: 1px solid var(--color-hairline);
+    transform: rotate(45deg);
+  }
+
+  .mino-bubble-right::after { right: 42px; }
+  .mino-bubble-left::after { left: 42px; }
+
+  .mino-chat {
+    @apply fixed bottom-6 flex h-[min(520px,calc(100vh-88px))] w-[360px] max-w-[calc(100vw-32px)] flex-col overflow-hidden rounded-[8px] border border-hairline bg-surface shadow-2xl pointer-events-auto;
+  }
+
+  .mino-chat-left { left: 24px; }
+  .mino-chat-right { right: 24px; }
+
+  .mino-chat-header {
+    @apply flex h-[62px] shrink-0 items-center justify-between border-b border-hairline bg-surface-container-lowest px-md;
+  }
+
+  .mino-live-error {
+    @apply flex shrink-0 items-start gap-xs border-b border-error/30 bg-error/10 px-sm py-xs text-[11px] leading-4 text-error;
+  }
+
+  .mino-live-error svg {
+    @apply mt-[1px] shrink-0;
+  }
+
+  .mino-live-error span {
+    @apply min-w-0 flex-1 break-words;
+  }
+
+  .mino-live-error button {
+    @apply shrink-0 font-semibold underline;
+  }
+
+  .mino-icon-button {
+    @apply flex h-8 w-8 items-center justify-center rounded-[6px] text-on-surface-variant hover:bg-surface-container-low hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary;
+  }
+
+  .mino-chat-messages {
+    @apply flex flex-1 flex-col gap-sm overflow-y-auto bg-canvas-soft p-md;
+  }
+
+  .mino-chat-status {
+    @apply flex items-center justify-center gap-xs py-lg text-body-sm text-on-surface-variant;
+  }
+
+  .mino-welcome {
+    @apply flex flex-col items-center gap-sm py-md text-center text-body-sm leading-5 text-on-surface-variant;
+  }
+
+  .mino-welcome .mino-sprite {
+    width: 58px;
+    height: 94px;
+  }
+
+  .mino-message {
+    @apply max-w-[86%] whitespace-pre-wrap break-words rounded-[8px] px-sm py-xs text-body-sm leading-5;
+  }
+
+  .mino-message-user {
+    @apply ml-auto bg-primary text-on-primary;
+  }
+
+  .mino-message-assistant {
+    @apply mr-auto border border-hairline bg-surface text-on-surface;
+  }
+
+  .mino-thinking {
+    @apply animate-pulse text-on-surface-variant;
+  }
+
+  .mino-quick-replies {
+    @apply flex shrink-0 gap-xs overflow-x-auto border-t border-hairline bg-surface px-sm py-xs;
+  }
+
+  .mino-quick-replies button {
+    @apply h-8 shrink-0 rounded-[7px] border border-hairline bg-surface-container-low px-sm text-[11px] text-on-surface hover:border-primary hover:text-primary disabled:opacity-50;
+  }
+
+  .mino-chat-input {
+    @apply flex min-h-[54px] shrink-0 items-end gap-1 border-t border-hairline bg-surface-container-lowest p-xs;
+  }
+
+  .mino-chat-input textarea {
+    @apply max-h-24 min-h-10 flex-1 resize-none rounded-[7px] border border-hairline bg-surface px-sm py-xs text-body-sm text-on-surface outline-none focus:border-primary focus:ring-1 focus:ring-primary;
+  }
+
+  .mino-chat-input button {
+    @apply flex h-10 w-9 shrink-0 items-center justify-center rounded-[6px] text-on-surface-variant hover:bg-surface-container-low hover:text-primary disabled:cursor-not-allowed disabled:opacity-35;
+  }
+
+  @keyframes mino-float {
+    0%, 100% { transform: translateY(0) rotate(0deg); }
+    50% { transform: translateY(-4px) rotate(0.8deg); }
+  }
+
+  @keyframes mino-think {
+    0%, 100% { transform: translateY(0) rotate(-1deg); }
+    50% { transform: translateY(-3px) rotate(2deg); }
+  }
+
+  @keyframes mino-hop {
+    0%, 100% { transform: translateY(0) scale(1); }
+    50% { transform: translateY(-7px) scale(1.02); }
+  }
+
+  @keyframes mino-confused {
+    0%, 100% { transform: rotate(0deg); }
+    35% { transform: rotate(-2deg); }
+    70% { transform: rotate(2deg); }
+  }
+
+  @media (max-width: 640px) {
+    .mino-character {
+      width: 72px;
+      height: 118px;
+    }
+
+    .mino-chat,
+    .mino-chat-left,
+    .mino-chat-right {
+      @apply inset-x-0 bottom-0 h-[min(72vh,560px)] w-full max-w-none rounded-b-none rounded-t-[8px];
+    }
+
+    .mino-bubble {
+      bottom: 136px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .mino-sprite,
+    .mino-character-thinking .mino-sprite,
+    .mino-character-excited .mino-sprite,
+    .mino-character-proud .mino-sprite,
+    .mino-character-confused .mino-sprite {
+      animation: none;
+    }
+  }
+}

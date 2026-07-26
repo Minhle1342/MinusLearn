@@ -32,8 +32,95 @@ const VIDEO_CARD_MIN_WIDTH = 210;
 const VIDEO_GRID_GAP = 16;
 const MAX_VIDEO_COLUMNS = 4;
 const VIDEO_ROWS_PER_PAGE = 2;
+const SECTIONS_PER_PAGE = 4;
 
-function PaginatedVideoSection({ title, subtitle, icon, videos, renderVideoCard, className = '' }) {
+function SectionSelectCheckbox({ checked, indeterminate, onChange }) {
+  const checkboxRef = useRef(null);
+
+  useEffect(() => {
+    if (checkboxRef.current) checkboxRef.current.indeterminate = indeterminate;
+  }, [indeterminate]);
+
+  return (
+    <input
+      ref={checkboxRef}
+      type="checkbox"
+      checked={checked}
+      onChange={onChange}
+      aria-checked={indeterminate ? 'mixed' : checked}
+      className="h-4 w-4 shrink-0 accent-primary"
+    />
+  );
+}
+
+function SectionPageControls({ currentPage, totalPages, visibleStart, visibleEnd, totalSections, onPageChange }) {
+  if (totalPages <= 1) return null;
+
+  return (
+    <div className="flex flex-col gap-sm rounded-[10px] border border-hairline bg-surface p-sm sm:flex-row sm:items-center sm:justify-between">
+      <div className="text-body-sm text-on-surface-variant">
+        Trang section {currentPage + 1}/{totalPages} · Hiển thị {visibleStart + 1}-{visibleEnd} trong {totalSections} section
+      </div>
+      <div className="flex flex-wrap items-center gap-xs" aria-label="Phân trang section video">
+        <button
+          type="button"
+          onClick={() => onPageChange(0)}
+          disabled={currentPage === 0}
+          title="Trang đầu"
+          aria-label="Trang section đầu"
+          className="flex h-9 w-9 items-center justify-center rounded-[8px] border border-hairline bg-surface text-on-surface-variant hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-35 transition-colors"
+        >
+          <span className="material-symbols-outlined text-[20px]">first_page</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => onPageChange(Math.max(0, currentPage - 1))}
+          disabled={currentPage === 0}
+          title="Trang trước"
+          aria-label="Trang section trước"
+          className="flex h-9 w-9 items-center justify-center rounded-[8px] border border-hairline bg-surface text-on-surface-variant hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-35 transition-colors"
+        >
+          <span className="material-symbols-outlined text-[20px]">chevron_left</span>
+        </button>
+
+        {Array.from({ length: totalPages }, (_, pageIndex) => (
+          <button
+            key={pageIndex}
+            type="button"
+            onClick={() => onPageChange(pageIndex)}
+            aria-current={pageIndex === currentPage ? 'page' : undefined}
+            className={`h-9 min-w-9 rounded-[8px] border px-sm text-body-sm font-medium transition-colors ${pageIndex === currentPage ? 'border-primary bg-primary text-on-primary' : 'border-hairline bg-surface text-on-surface-variant hover:border-primary hover:text-primary'}`}
+          >
+            {pageIndex + 1}
+          </button>
+        ))}
+
+        <button
+          type="button"
+          onClick={() => onPageChange(Math.min(totalPages - 1, currentPage + 1))}
+          disabled={currentPage === totalPages - 1}
+          title="Trang tiếp theo"
+          aria-label="Trang section tiếp theo"
+          className="flex h-9 w-9 items-center justify-center rounded-[8px] border border-hairline bg-surface text-on-surface-variant hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-35 transition-colors"
+        >
+          <span className="material-symbols-outlined text-[20px]">chevron_right</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => onPageChange(totalPages - 1)}
+          disabled={currentPage === totalPages - 1}
+          title="Trang cuối"
+          aria-label="Trang section cuối"
+          className="flex h-9 w-9 items-center justify-center rounded-[8px] border border-hairline bg-surface text-on-surface-variant hover:border-primary hover:text-primary disabled:cursor-not-allowed disabled:opacity-35 transition-colors"
+        >
+          <span className="material-symbols-outlined text-[20px]">last_page</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PaginatedVideoSection({ title, subtitle, icon, videos, renderVideoCard, controls = null, className = '' }) {
   const gridRef = useRef(null);
   const [columnCount, setColumnCount] = useState(1);
   const [currentPage, setCurrentPage] = useState(0);
@@ -117,6 +204,8 @@ function PaginatedVideoSection({ title, subtitle, icon, videos, renderVideoCard,
         )}
       </div>
 
+      {controls && <div className="mb-md">{controls}</div>}
+
       <div
         ref={gridRef}
         className="grid gap-md"
@@ -153,6 +242,8 @@ export function BilingualVideo({ videos, setVideos, topics, setTopics, onVideoSe
   const [newTopicName, setNewTopicName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [saveProgress, setSaveProgress] = useState(0);
+  const [selectedVideoIds, setSelectedVideoIds] = useState(() => new Set());
+  const [currentSectionPage, setCurrentSectionPage] = useState(0);
 
   useEffect(() => {
     if (topics.length === 0) {
@@ -164,6 +255,73 @@ export function BilingualVideo({ videos, setVideos, topics, setTopics, onVideoSe
       setSelectedTopicId(topics[0].id);
     }
   }, [topics, selectedTopicId]);
+
+  useEffect(() => {
+    const existingVideoIds = new Set(videos.map(video => video.id));
+    setSelectedVideoIds(currentSelectedIds => {
+      const nextSelectedIds = new Set([...currentSelectedIds].filter(videoId => existingVideoIds.has(videoId)));
+      return nextSelectedIds.size === currentSelectedIds.size ? currentSelectedIds : nextSelectedIds;
+    });
+  }, [videos]);
+
+  const toggleVideoSelection = videoId => {
+    setSelectedVideoIds(currentSelectedIds => {
+      const nextSelectedIds = new Set(currentSelectedIds);
+      if (nextSelectedIds.has(videoId)) {
+        nextSelectedIds.delete(videoId);
+      } else {
+        nextSelectedIds.add(videoId);
+      }
+      return nextSelectedIds;
+    });
+  };
+
+  const setTopicSelection = (topicVideos, isSelected) => {
+    setSelectedVideoIds(currentSelectedIds => {
+      const nextSelectedIds = new Set(currentSelectedIds);
+      topicVideos.forEach(video => {
+        if (isSelected) {
+          nextSelectedIds.add(video.id);
+        } else {
+          nextSelectedIds.delete(video.id);
+        }
+      });
+      return nextSelectedIds;
+    });
+  };
+
+  const deleteVideosAndEmptySections = async videoIdsToDelete => {
+    if (videoIdsToDelete.length === 0) return;
+
+    const deleteIdSet = new Set(videoIdsToDelete);
+    const nextVideos = videos.filter(video => !deleteIdSet.has(video.id));
+    const emptyTopicsAfterDelete = topics.filter(topic => {
+      const hadDeletedVideo = videos.some(video => video.topicId === topic.id && deleteIdSet.has(video.id));
+      const hasRemainingVideo = nextVideos.some(video => video.topicId === topic.id);
+      return hadDeletedVideo && !hasRemainingVideo;
+    });
+
+    if (emptyTopicsAfterDelete.length > 0) {
+      const sectionNames = emptyTopicsAfterDelete.map(topic => `"${topic.name}"`).join(', ');
+      const confirmed = window.confirm(
+        `Bạn đang xóa toàn bộ video trong section ${sectionNames}. Section này không còn video nên sẽ bị xóa luôn. Tiếp tục?`
+      );
+      if (!confirmed) return;
+    }
+
+    await setVideos(nextVideos);
+
+    if (emptyTopicsAfterDelete.length > 0) {
+      const emptyTopicIds = new Set(emptyTopicsAfterDelete.map(topic => topic.id));
+      await setTopics(currentTopics => currentTopics.filter(topic => !emptyTopicIds.has(topic.id)));
+    }
+
+    setSelectedVideoIds(currentSelectedIds => {
+      const nextSelectedIds = new Set(currentSelectedIds);
+      videoIdsToDelete.forEach(videoId => nextSelectedIds.delete(videoId));
+      return nextSelectedIds;
+    });
+  };
 
   const createTopicIfNeeded = async () => {
     if (!newTopicName.trim()) return selectedTopicId;
@@ -389,9 +547,17 @@ export function BilingualVideo({ videos, setVideos, topics, setTopics, onVideoSe
       videos: videos.filter(v => v.topicId === topic.id)
     };
   }).filter(group => group.videos.length > 0);
+  const sectionPageCount = Math.max(1, Math.ceil(videosByTopic.length / SECTIONS_PER_PAGE));
+  const sectionPageStart = currentSectionPage * SECTIONS_PER_PAGE;
+  const sectionPageEnd = Math.min(sectionPageStart + SECTIONS_PER_PAGE, videosByTopic.length);
+  const visibleTopicGroups = videosByTopic.slice(sectionPageStart, sectionPageEnd);
   const inProgressVideos = videos
     .filter(isVideoInProgress)
     .sort((first, second) => Number(second.lastWatchedAt || 0) - Number(first.lastWatchedAt || 0));
+
+  useEffect(() => {
+    setCurrentSectionPage(page => Math.min(page, sectionPageCount - 1));
+  }, [sectionPageCount]);
 
   return (
     <div className="w-full max-w-5xl mx-auto p-lg">
@@ -707,33 +873,114 @@ export function BilingualVideo({ videos, setVideos, topics, setTopics, onVideoSe
             Chưa có video nào. Hãy nhập link Youtube để bắt đầu!
           </div>
         )}
-        {videosByTopic.map(group => (
-          <PaginatedVideoSection
-            key={group.topic.id}
-            title={group.topic.name}
-            videos={group.videos}
-            renderVideoCard={video => (
-                <button
-                  key={video.id}
-                  type="button"
-                  onClick={() => onVideoSelect(video.id)}
-                  title={video.title}
-                  className="min-w-0 bg-surface rounded-[12px] overflow-hidden border border-hairline cursor-pointer hover:shadow-md hover:border-primary/40 transition-all group flex flex-col text-left"
-                >
-                  <div className="relative aspect-video w-full overflow-hidden bg-black">
-                    <img
-                      src={video.thumbnail}
-                      alt=""
-                      className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
+        <SectionPageControls
+          currentPage={currentSectionPage}
+          totalPages={sectionPageCount}
+          visibleStart={sectionPageStart}
+          visibleEnd={sectionPageEnd}
+          totalSections={videosByTopic.length}
+          onPageChange={setCurrentSectionPage}
+        />
+        {visibleTopicGroups.map(group => {
+          const selectedCount = group.videos.filter(video => selectedVideoIds.has(video.id)).length;
+          const allVideosSelected = selectedCount === group.videos.length;
+          const hasPartialSelection = selectedCount > 0 && !allVideosSelected;
+          const selectedVideoIdsInTopic = group.videos
+            .filter(video => selectedVideoIds.has(video.id))
+            .map(video => video.id);
+
+          return (
+            <PaginatedVideoSection
+              key={group.topic.id}
+              title={group.topic.name}
+              videos={group.videos}
+              controls={selectedCount > 0 ? (
+                <div className="flex flex-col gap-sm rounded-[10px] border border-hairline bg-surface-container-low p-sm sm:flex-row sm:items-center sm:justify-between">
+                  <label className="flex min-w-0 items-center gap-sm text-body-sm font-medium text-on-surface">
+                    <SectionSelectCheckbox
+                      checked={allVideosSelected}
+                      indeterminate={hasPartialSelection}
+                      onChange={event => setTopicSelection(group.videos, event.target.checked)}
                     />
+                    <span className="truncate">Chọn tất cả video trong section</span>
+                  </label>
+
+                  <div className="flex flex-wrap items-center gap-sm">
+                    <span className="text-body-sm text-on-surface-variant">
+                      Đã chọn {selectedCount}/{group.videos.length}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => deleteVideosAndEmptySections(selectedVideoIdsInTopic)}
+                      disabled={selectedCount === 0}
+                      className="inline-flex items-center gap-xs rounded-[8px] border border-error/40 px-sm py-xs text-body-sm font-medium text-error hover:bg-error/10 disabled:cursor-not-allowed disabled:opacity-45"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">delete</span>
+                      Xóa đã chọn
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteVideosAndEmptySections(group.videos.map(video => video.id))}
+                      className="inline-flex items-center gap-xs rounded-[8px] bg-error px-sm py-xs text-body-sm font-medium text-white hover:opacity-90"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">delete_sweep</span>
+                      Xóa tất cả
+                    </button>
                   </div>
-                  <div className="p-sm flex-1 flex flex-col justify-between">
-                    <h3 className="font-body-md text-on-surface line-clamp-2 font-medium">{video.title}</h3>
+                </div>
+              ) : null}
+              renderVideoCard={video => {
+                const isSelected = selectedVideoIds.has(video.id);
+
+                return (
+                  <div
+                    key={video.id}
+                    className={`group relative min-w-0 overflow-hidden rounded-[12px] border bg-surface transition-all ${isSelected ? 'border-primary ring-2 ring-primary/25' : 'border-hairline hover:border-primary/40 hover:shadow-md'}`}
+                  >
+                    <label
+                      className="absolute left-sm top-sm z-10 flex h-9 w-9 items-center justify-center rounded-[8px] border border-hairline bg-surface/95 shadow-sm"
+                      title={isSelected ? 'Bỏ chọn video' : 'Chọn video'}
+                      onClick={event => event.stopPropagation()}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleVideoSelection(video.id)}
+                        aria-label={`${isSelected ? 'Bỏ chọn' : 'Chọn'} ${video.title}`}
+                        className="h-4 w-4 accent-primary"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => onVideoSelect(video.id)}
+                      title={video.title}
+                      className="flex h-full w-full cursor-pointer flex-col text-left"
+                    >
+                      <div className="relative aspect-video w-full overflow-hidden bg-black">
+                        <img
+                          src={video.thumbnail}
+                          alt=""
+                          className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        />
+                      </div>
+                      <div className="p-sm flex-1 flex flex-col justify-between">
+                        <h3 className="font-body-md text-on-surface line-clamp-2 font-medium">{video.title}</h3>
+                      </div>
+                    </button>
                   </div>
-                </button>
-            )}
-          />
-        ))}
+                );
+              }}
+            />
+          );
+        })}
+        <SectionPageControls
+          currentPage={currentSectionPage}
+          totalPages={sectionPageCount}
+          visibleStart={sectionPageStart}
+          visibleEnd={sectionPageEnd}
+          totalSections={videosByTopic.length}
+          onPageChange={setCurrentSectionPage}
+        />
       </div>
     </div>
   );

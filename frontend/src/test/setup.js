@@ -20,12 +20,14 @@ Object.defineProperty(window, 'matchMedia', {
 
 Object.defineProperty(window, 'speechSynthesis', {
   configurable: true,
-  value: { speak: vi.fn(), cancel: vi.fn() },
+  value: { speak: vi.fn(), cancel: vi.fn(), getVoices: vi.fn(() => []) },
 });
 
 globalThis.SpeechSynthesisUtterance = class SpeechSynthesisUtterance {
   constructor(text) { this.text = text; this.lang = ''; }
 };
+
+globalThis.PointerEvent = MouseEvent;
 
 URL.createObjectURL = vi.fn(() => 'blob:test');
 URL.revokeObjectURL = vi.fn();

@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Key, Bot, Palette, Volume2, Download, Upload, DatabaseBackup, LogOut } from 'lucide-react';
+import { X, Key, Bot, Palette, Volume2, Download, Upload, DatabaseBackup, LogOut, Sparkles, Square, Trash2, Wifi, WifiOff } from 'lucide-react';
 import { GEMINI_DEFAULT_KEY, GEMINI_DEFAULT_MODEL } from '../../services/api';
 import { apiRequest } from '../../services/backendApi';
 import { saveDeviceCredentials } from '../../services/deviceCredentials';
 import { getEnglishVoices, speakEnglishText } from '../../utils/speech';
+import { GeminiLiveSession, isGeminiLiveSupported } from '../../services/geminiLive';
 import { useAuth } from '../../contexts/AuthContext';
 
 const DEFAULT_SETTINGS = {
@@ -17,7 +18,22 @@ const DEFAULT_SETTINGS = {
   theme: 'current',
   speechVoiceURI: '',
   speakingAssessmentMode: 'web-speech',
+  mascotEnabled: true,
+  mascotProactivity: 'timed',
+  mascotAutoSpeak: true,
+  mascotVietnameseVoiceURI: '',
+  mascotLiveVoiceEnabled: true,
+  mascotGeminiVoice: 'Aoede',
 };
+
+const GEMINI_VOICES = [
+  { value: 'Aoede', label: 'Aoede - nhẹ nhàng' },
+  { value: 'Achird', label: 'Achird - thân thiện' },
+  { value: 'Sulafat', label: 'Sulafat - ấm áp' },
+  { value: 'Puck', label: 'Puck - vui tươi' },
+  { value: 'Kore', label: 'Kore - rõ ràng' },
+  { value: 'Leda', label: 'Leda - trẻ trung' },
+];
 
 const BACKUP_VERSION = 1;
 const STORAGE_PREFIX = 'minuslearn_';
@@ -48,6 +64,8 @@ export function SettingsModal({ isOpen, onClose, settings, onSaveSettings }) {
   const { logout } = useAuth();
   const [activeTab, setActiveTab] = useState('ai');
   const [englishVoices, setEnglishVoices] = useState([]);
+  const [mascotHealth, setMascotHealth] = useState(null);
+  const [mascotVoicePreview, setMascotVoicePreview] = useState('idle');
   const [localSettings, setLocalSettings] = useState(DEFAULT_SETTINGS);
   const [backupStatus, setBackupStatus] = useState(null);
   const [restoreReady, setRestoreReady] = useState(false);
@@ -55,6 +73,7 @@ export function SettingsModal({ isOpen, onClose, settings, onSaveSettings }) {
   const [dataBusy, setDataBusy] = useState(false);
   const restoreInputRef = useRef(null);
   const migrationInputRef = useRef(null);
+  const mascotPreviewSessionRef = useRef(null);
 
   useEffect(() => {
     if (isOpen && settings) {
@@ -83,6 +102,20 @@ export function SettingsModal({ isOpen, onClose, settings, onSaveSettings }) {
     };
   }, [isOpen]);
 
+  useEffect(() => () => {
+    mascotPreviewSessionRef.current?.close();
+    mascotPreviewSessionRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'mino') return;
+    let cancelled = false;
+    apiRequest('/api/mascot/health')
+      .then(result => { if (!cancelled) setMascotHealth(result); })
+      .catch(() => { if (!cancelled) setMascotHealth({ online: false, modelAvailable: false }); });
+    return () => { cancelled = true; };
+  }, [activeTab, isOpen]);
+
   if (!isOpen) return null;
 
   const isSpeechSupported = typeof window !== 'undefined' && Boolean(window.speechSynthesis);
@@ -98,6 +131,37 @@ export function SettingsModal({ isOpen, onClose, settings, onSaveSettings }) {
       localSettings.speechVoiceURI,
       { rate: 0.9 }
     );
+  };
+
+  const handlePreviewMascotVoice = async () => {
+    if (['connecting', 'speaking'].includes(mascotVoicePreview)) {
+      mascotPreviewSessionRef.current?.close();
+      mascotPreviewSessionRef.current = null;
+      setMascotVoicePreview('idle');
+      return;
+    }
+    mascotPreviewSessionRef.current?.close();
+    const session = new GeminiLiveSession({
+      voiceName: localSettings.mascotGeminiVoice || 'Aoede',
+      onState: setMascotVoicePreview,
+      onPlaybackEnd: () => {
+        session.close();
+        if (mascotPreviewSessionRef.current === session) mascotPreviewSessionRef.current = null;
+        setMascotVoicePreview('idle');
+      },
+      onError: () => setMascotVoicePreview('error'),
+    });
+    mascotPreviewSessionRef.current = session;
+    try {
+      await session.speakText('Xin chào, mình là Mino. Hôm nay chúng ta cùng học tiếng Anh nhé!');
+    } catch {
+      setMascotVoicePreview('error');
+    }
+  };
+
+  const handleClearMascotHistory = async () => {
+    if (!window.confirm('Xóa toàn bộ lịch sử trò chuyện với Mino?')) return;
+    await apiRequest('/api/mascot/history', { method: 'DELETE' });
   };
 
   const downloadJson = (backup, prefix = 'minuslearn-backup') => {
@@ -267,6 +331,14 @@ export function SettingsModal({ isOpen, onClose, settings, onSaveSettings }) {
           >
             <Volume2 size={18} />
             <span className="font-body-md text-sm">Giọng đọc</span>
+          </button>
+
+          <button
+            className={`flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-colors ${activeTab === 'mino' ? 'bg-primary/10 text-primary font-medium' : 'text-on-surface-variant hover:bg-surface-container-low'}`}
+            onClick={() => setActiveTab('mino')}
+          >
+            <Sparkles size={18} />
+            <span className="font-body-md text-sm">Mino</span>
           </button>
 
           <button
@@ -496,6 +568,120 @@ export function SettingsModal({ isOpen, onClose, settings, onSaveSettings }) {
                       Chưa tìm thấy giọng đọc tiếng Anh. Thử mở lại bằng Microsoft Edge hoặc kiểm tra cài đặt text to speech của hệ thống.
                     </div>
                   )}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'mino' && (
+              <div className="max-w-xl flex flex-col gap-6">
+                <div>
+                  <h3 className="text-heading-3 font-heading-3 text-on-surface mb-2">Bạn học Mino</h3>
+                  <p className="text-body-sm text-on-surface-variant">
+                    Mino dùng Qwen local để trò chuyện, gợi ý ôn tập và đồng hành trong các bài luyện.
+                  </p>
+                </div>
+
+                <div className={`flex items-center gap-sm rounded-[8px] border p-sm text-body-sm ${mascotHealth?.online && mascotHealth?.modelAvailable ? 'border-accent-green/40 bg-accent-green/10 text-accent-green' : 'border-hairline bg-surface text-on-surface-variant'}`}>
+                  {mascotHealth?.online && mascotHealth?.modelAvailable ? <Wifi size={18} /> : <WifiOff size={18} />}
+                  <span className="flex flex-col gap-1">
+                    <span>{mascotHealth?.online && mascotHealth?.modelAvailable
+                      ? `Qwen local đã sẵn sàng (${mascotHealth.model})`
+                      : 'Chưa tìm thấy Ollama hoặc model qwen2.5:1.5b'}</span>
+                    <span>{mascotHealth?.liveVoiceConfigured
+                      ? `Gemini Live đã cấu hình (${mascotHealth.liveVoiceModel})`
+                      : 'Gemini Live chưa có khóa API ở backend'}</span>
+                  </span>
+                </div>
+
+                <label className="flex items-center justify-between gap-md rounded-[8px] border border-hairline bg-surface p-md">
+                  <span>
+                    <span className="block text-body-md font-semibold text-on-surface">Hiển thị Mino</span>
+                    <span className="block text-body-sm text-on-surface-variant">Cho phép mascot xuất hiện trên các màn học.</span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={localSettings.mascotEnabled !== false}
+                    onChange={event => setLocalSettings({ ...localSettings, mascotEnabled: event.target.checked })}
+                    className="h-5 w-5 accent-primary"
+                  />
+                </label>
+
+                <div>
+                  <label className="mb-xs block text-body-sm font-semibold text-on-surface">Mức chủ động</label>
+                  <div className="grid grid-cols-2 overflow-hidden rounded-[8px] border border-hairline bg-surface">
+                    <button
+                      type="button"
+                      onClick={() => setLocalSettings({ ...localSettings, mascotProactivity: 'timed' })}
+                      className={`px-md py-sm text-body-sm ${localSettings.mascotProactivity !== 'event' ? 'bg-primary text-on-primary' : 'text-on-surface-variant hover:bg-surface-container-low'}`}
+                    >
+                      Theo thời gian
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLocalSettings({ ...localSettings, mascotProactivity: 'event' })}
+                      className={`border-l border-hairline px-md py-sm text-body-sm ${localSettings.mascotProactivity === 'event' ? 'bg-primary text-on-primary' : 'text-on-surface-variant hover:bg-surface-container-low'}`}
+                    >
+                      Theo sự kiện
+                    </button>
+                  </div>
+                </div>
+
+                <label className="flex items-center justify-between gap-md rounded-[8px] border border-hairline bg-surface p-md">
+                  <span>
+                    <span className="block text-body-md font-semibold text-on-surface">Tự động đọc thành tiếng</span>
+                    <span className="block text-body-sm text-on-surface-variant">Mino sẽ chờ khi bài học đang dùng âm thanh.</span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={localSettings.mascotAutoSpeak !== false}
+                    onChange={event => setLocalSettings({ ...localSettings, mascotAutoSpeak: event.target.checked })}
+                    className="h-5 w-5 accent-primary"
+                  />
+                </label>
+
+                <div className="flex flex-col gap-xs">
+                  <label className="flex items-center justify-between gap-md rounded-[8px] border border-hairline bg-surface p-md">
+                    <span>
+                      <span className="block text-body-md font-semibold text-on-surface">Gemini Live cho Mino</span>
+                      <span className="block text-body-sm text-on-surface-variant">Giọng Việt tự nhiên và trò chuyện âm thanh hai chiều.</span>
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={localSettings.mascotLiveVoiceEnabled !== false}
+                      onChange={event => setLocalSettings({ ...localSettings, mascotLiveVoiceEnabled: event.target.checked })}
+                      className="h-5 w-5 accent-primary"
+                    />
+                  </label>
+                </div>
+
+                <div className="flex flex-col gap-xs">
+                  <label className="text-body-sm font-semibold text-on-surface">Giọng Gemini của Mino</label>
+                  <div className="flex gap-xs">
+                    <select
+                      value={localSettings.mascotGeminiVoice || 'Aoede'}
+                      onChange={event => setLocalSettings({ ...localSettings, mascotGeminiVoice: event.target.value })}
+                      className="min-w-0 flex-1 rounded-[8px] border border-outline-variant bg-surface-container-lowest px-sm py-sm text-body-sm outline-none focus:ring-2 focus:ring-primary"
+                    >
+                      {GEMINI_VOICES.map(voice => <option key={voice.value} value={voice.value}>{voice.label}</option>)}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={handlePreviewMascotVoice}
+                      disabled={!mascotHealth?.liveVoiceConfigured || !isGeminiLiveSupported()}
+                      className="mino-icon-button border border-hairline bg-surface disabled:opacity-40"
+                      title="Nghe thử giọng Gemini"
+                    >
+                      {['connecting', 'speaking'].includes(mascotVoicePreview) ? <Square size={17} /> : <Volume2 size={18} />}
+                    </button>
+                  </div>
+                  {!mascotHealth?.liveVoiceConfigured && <p className="text-xs text-error">Gemini Live chưa có khóa API ở backend.</p>}
+                  {mascotVoicePreview === 'error' && <p className="text-xs text-error">Không thể phát giọng Gemini Live. Mino sẽ dùng giọng trình duyệt dự phòng.</p>}
+                </div>
+
+                <div className="flex justify-end border-t border-hairline pt-md">
+                  <button type="button" onClick={handleClearMascotHistory} className="flex items-center gap-xs rounded-[8px] border border-error/40 px-md py-sm text-body-sm text-error hover:bg-error/10">
+                    <Trash2 size={16} /> Xóa lịch sử trò chuyện
+                  </button>
                 </div>
               </div>
             )}

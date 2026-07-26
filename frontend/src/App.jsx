@@ -19,6 +19,8 @@ import { WritingPractice } from './components/page/WritingPractice';
 import { ExamPage } from './components/page/ExamPage';
 import { BilingualVideo } from './components/page/BilingualVideo';
 import { VideoDetail } from './components/page/VideoDetail';
+import { AudioFocusProvider } from './contexts/AudioFocusContext';
+import { MascotProvider } from './components/mascot/MascotProvider';
 
 function LearningApp() {
   const [topics, setTopics, topicsMeta] = useRemoteStorage('minuslearn_topics', [
@@ -39,7 +41,13 @@ function LearningApp() {
     fontStyle: 'inter',
     theme: 'current',
     speechVoiceURI: '',
-    speakingAssessmentMode: 'web-speech'
+    speakingAssessmentMode: 'web-speech',
+    mascotEnabled: true,
+    mascotProactivity: 'timed',
+    mascotAutoSpeak: true,
+    mascotVietnameseVoiceURI: '',
+    mascotLiveVoiceEnabled: true,
+    mascotGeminiVoice: 'Aoede'
   });
   const [srData, setSrData] = useRemoteStorage('minuslearn_sr_data', {});
 
@@ -242,7 +250,15 @@ function LearningApp() {
     (activePage === 'exam' && examMode === 'calendar');
 
   return (
-    <div className="flex flex-col h-screen w-full overflow-hidden">
+    <AudioFocusProvider>
+      <MascotProvider
+        activePage={activePage}
+        activeTopicId={activeTopicId}
+        settings={settings}
+        isModalOpen={isTopicModalOpen || isWordModalOpen || isSettingsModalOpen || isDrawerOpen}
+        onNavigate={setActivePage}
+      >
+      <div className="flex flex-col h-screen w-full overflow-hidden">
       <TopNavBar
         words={words}
         topics={topics}
@@ -531,7 +547,9 @@ function LearningApp() {
         settings={settings}
         onSaveSettings={setSettings}
       />
-    </div>
+      </div>
+      </MascotProvider>
+    </AudioFocusProvider>
   );
 }
 

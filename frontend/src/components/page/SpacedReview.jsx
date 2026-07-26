@@ -11,6 +11,7 @@ import {
 } from '../../utils/spacedRepetition';
 import { speakEnglishText } from '../../utils/speech';
 import { API_BASE_URL } from '../../services/backendApi';
+import { useMascot } from '../mascot/MascotProvider';
 
 const resolveImageUrl = (url) => {
   if (!url) return null;
@@ -22,11 +23,18 @@ const resolveImageUrl = (url) => {
 };
 
 export function SpacedReview({ words, activeTopicId, topics, srData, setSrData, settings }) {
+  const { emitMascotEvent } = useMascot();
   const [phase, setPhase] = useState('setup'); // 'setup' | 'reviewing' | 'summary'
   const [reviewQueue, setReviewQueue] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
   const [sessionResults, setSessionResults] = useState([]); // [{ wordId, quality, word }]
+
+  useEffect(() => {
+    if (phase === 'summary') {
+      emitMascotEvent({ type: 'activity_completed', detail: `spaced review: ${sessionResults.length} words` });
+    }
+  }, [emitMascotEvent, phase, sessionResults.length]);
 
   const topicWords = useMemo(() => words.filter(w => w.topicId === activeTopicId), [words, activeTopicId]);
   const currentTopic = topics.find(t => t.id === activeTopicId);

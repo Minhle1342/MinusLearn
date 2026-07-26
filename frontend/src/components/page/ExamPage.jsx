@@ -28,6 +28,7 @@ import {
   formatWritingTime,
 } from '../../utils/examWriting';
 import { recordReview } from '../../utils/spacedRepetition';
+import { setLearningAudioFocus } from '../../utils/audioFocus';
 
 function shuffleArray(arr) {
   return [...arr].sort(() => 0.5 - Math.random());
@@ -102,6 +103,11 @@ export function ExamPage({
   const chatEndRef = useRef(null);
   const writingDraftRef = useRef(null);
   const [speakerVoiceMap, setSpeakerVoiceMap] = useState({});
+
+  useEffect(() => {
+    setLearningAudioFocus('exam-audio', isPlaying || isRecording);
+    return () => setLearningAudioFocus('exam-audio', false);
+  }, [isPlaying, isRecording]);
 
   // ── Reading state ──
   const [currentReadingQ, setCurrentReadingQ] = useState(0);
