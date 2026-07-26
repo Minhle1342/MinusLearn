@@ -365,7 +365,7 @@ export function BilingualVideo({ videos, setVideos, topics, setTopics, onVideoSe
            return p + 5;
         }
         if (p < 95) {
-           setProgressText('Đang trích xuất phụ đề (có thể mất chút thời gian)...');
+           setProgressText('Đang lấy hoặc tạo transcript (có thể mất vài phút)...');
            return p + 2;
         }
         return p;
@@ -484,6 +484,16 @@ export function BilingualVideo({ videos, setVideos, topics, setTopics, onVideoSe
           }
         } catch (error) {
           failed.push({ url, reason: error.message });
+          if (error.status === 429) {
+            uniqueUrls.slice(index + 1).forEach(pendingUrl => {
+              failed.push({
+                url: pendingUrl,
+                reason: 'Đã dừng để tránh YouTube tiếp tục giới hạn IP. Hãy cấu hình proxy rồi thử lại.'
+              });
+            });
+            setProgress(100);
+            break;
+          }
         }
 
         setProgress(Math.round(((index + 1) / uniqueUrls.length) * 100));

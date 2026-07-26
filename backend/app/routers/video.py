@@ -1,4 +1,10 @@
 import asyncio
+from collections import OrderedDict
+from copy import deepcopy
+import json
+from pathlib import Path
+import tempfile
+import time
 from urllib.parse import parse_qs, urlparse
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Response
@@ -6,9 +12,12 @@ import edge_tts
 from edge_tts.exceptions import NoAudioReceived
 import httpx
 from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api._errors import IpBlocked, RequestBlocked
+from youtube_transcript_api.proxies import GenericProxyConfig
 import yt_dlp
 from yt_dlp.utils import DownloadError
 
+from ..config import get_settings
 from ..dependencies import get_current_user, get_database
 from ..services.data_service import list_documents, replace_documents, upsert_document, patch_document
 from ..services.video_learning_service import (
@@ -24,6 +33,45 @@ HOAIMY_VOICE = "vi-VN-HoaiMyNeural"
 HOAIMY_MAX_CONCURRENT_REQUESTS = 2
 HOAIMY_RETRY_DELAYS = (0.25, 0.75)
 hoaimy_request_semaphore = asyncio.Semaphore(HOAIMY_MAX_CONCURRENT_REQUESTS)
+YOUTUBE_TRANSCRIPT_LANGUAGES = ["en", "en-US", "en-GB"]
+YOUTUBE_TRANSCRIPT_CACHE_MAX_ITEMS = 256
+YOUTUBE_IP_BLOCK_MESSAGE = (
+    "YouTube đang giới hạn IP của máy chủ (HTTP 429). MinusLearn đã thử các nguồn phụ đề "
+    "khả dụng. Hãy cấu hình YOUTUBE_PROXY_URL bằng rotating residential proxy rồi khởi "
+    "động lại backend, hoặc chờ IP được gỡ chặn."
+)
+youtube_request_lock = asyncio.Lock()
+youtube_last_request_started_at = 0.0
+youtube_transcript_cache: OrderedDict[str, tuple[float, list[dict]]] = OrderedDict()
+youtube_caption_blocked_until = 0.0
+youtube_whisper_models = {}
+
+
+class YouTubeIpBlockedError(RuntimeError):
+    pass
+
+
+class YouTubeTranscriptUnavailableError(RuntimeError):
+    pass
+
+
+class YouTubeLocalTranscriptionError(RuntimeError):
+    pass
+
+
+class YtDlpSilentLogger:
+    def debug(self, _message):
+        pass
+
+    def info(self, _message):
+        pass
+
+    def warning(self, _message):
+        pass
+
+    def error(self, _message):
+        pass
+
 
 def user_id(user: dict) -> str:
     return user["userId"]
@@ -62,15 +110,299 @@ def extract_youtube_playlist_id(url: str) -> str | None:
     return playlist_id
 
 
-def fetch_youtube_playlist_info(playlist_url: str) -> dict:
+def youtube_proxy_url() -> str:
+    return get_settings().youtube_proxy_url.strip()
+
+
+def youtube_dlp_options() -> dict:
+    settings = get_settings()
     options = {
-        "extract_flat": "in_playlist",
         "skip_download": True,
         "quiet": True,
         "no_warnings": True,
+        "retries": 1,
+        "logger": YtDlpSilentLogger(),
+    }
+    if settings.youtube_proxy_url.strip():
+        options["proxy"] = settings.youtube_proxy_url.strip()
+    if settings.youtube_cookies_file.strip():
+        options["cookiefile"] = settings.youtube_cookies_file.strip()
+    return options
+
+
+def fetch_youtube_playlist_info(playlist_url: str) -> dict:
+    options = {
+        **youtube_dlp_options(),
+        "extract_flat": "in_playlist",
     }
     with yt_dlp.YoutubeDL(options) as downloader:
         return downloader.extract_info(playlist_url, download=False)
+
+
+def parse_ytdlp_json3_transcript(payload: dict) -> list[dict]:
+    transcript = []
+    for event in payload.get("events") or []:
+        segments = event.get("segs") or []
+        text = "".join(str(segment.get("utf8") or "") for segment in segments)
+        text = " ".join(text.replace("\n", " ").split())
+        if not text:
+            continue
+
+        try:
+            start = max(0.0, float(event.get("tStartMs") or 0) / 1000)
+            duration = max(0.0, float(event.get("dDurationMs") or 0) / 1000)
+        except (TypeError, ValueError):
+            continue
+
+        transcript.append({"text": text, "start": start, "duration": duration})
+    return transcript
+
+
+def fetch_youtube_transcript_with_ytdlp(video_id: str) -> list[dict]:
+    with tempfile.TemporaryDirectory(prefix="minuslearn-youtube-") as temp_dir:
+        options = {
+            **youtube_dlp_options(),
+            "noplaylist": True,
+            "writesubtitles": True,
+            "writeautomaticsub": True,
+            "subtitleslangs": ["en"],
+            "subtitlesformat": "json3",
+            "outtmpl": str(Path(temp_dir) / "%(id)s.%(ext)s"),
+        }
+        with yt_dlp.YoutubeDL(options) as downloader:
+            info = downloader.extract_info(
+                f"https://www.youtube.com/watch?v={video_id}",
+                download=True,
+            )
+
+        requested_subtitles = info.get("requested_subtitles") or {}
+        subtitle = requested_subtitles.get("en") or next(iter(requested_subtitles.values()), None)
+        subtitle_path = Path(str((subtitle or {}).get("filepath") or ""))
+        if not subtitle_path.is_file():
+            matches = list(Path(temp_dir).glob(f"{video_id}*.json3"))
+            subtitle_path = matches[0] if matches else subtitle_path
+        if not subtitle_path.is_file():
+            raise YouTubeTranscriptUnavailableError("yt-dlp did not return an English subtitle")
+
+        with subtitle_path.open("r", encoding="utf-8") as subtitle_file:
+            transcript = parse_ytdlp_json3_transcript(json.load(subtitle_file))
+        if not transcript:
+            raise YouTubeTranscriptUnavailableError("yt-dlp returned an empty English subtitle")
+        return transcript
+
+
+def youtube_transcript_mode() -> str:
+    mode = get_settings().youtube_transcript_mode.strip().lower()
+    return mode if mode in {"auto", "captions", "local"} else "auto"
+
+
+def get_youtube_whisper_model():
+    settings = get_settings()
+    model_key = (
+        settings.youtube_whisper_model.strip() or "base.en",
+        settings.youtube_whisper_device.strip() or "cpu",
+        settings.youtube_whisper_compute_type.strip() or "int8",
+    )
+    if model_key not in youtube_whisper_models:
+        try:
+            from faster_whisper import WhisperModel
+        except ImportError as error:
+            raise YouTubeLocalTranscriptionError(
+                "Thiếu faster-whisper. Hãy cài lại backend requirements."
+            ) from error
+        youtube_whisper_models[model_key] = WhisperModel(
+            model_key[0],
+            device=model_key[1],
+            compute_type=model_key[2],
+        )
+    return youtube_whisper_models[model_key]
+
+
+def download_youtube_audio(video_id: str, temp_dir: str) -> Path:
+    max_duration = max(60, get_settings().youtube_whisper_max_duration_seconds)
+
+    def reject_long_video(info, *, incomplete):
+        if incomplete:
+            return None
+        duration = float(info.get("duration") or 0)
+        if duration > max_duration:
+            return f"Video dài hơn giới hạn local transcription ({max_duration} giây)"
+        return None
+
+    options = {
+        **youtube_dlp_options(),
+        "skip_download": False,
+        "noplaylist": True,
+        "format": "ba[abr<=96]/ba/b[height<=360]",
+        "match_filter": reject_long_video,
+        "outtmpl": str(Path(temp_dir) / "%(id)s.%(ext)s"),
+    }
+    with yt_dlp.YoutubeDL(options) as downloader:
+        downloader.extract_info(
+            f"https://www.youtube.com/watch?v={video_id}",
+            download=True,
+        )
+
+    audio_files = [
+        path for path in Path(temp_dir).iterdir()
+        if path.is_file() and path.suffix not in {".part", ".ytdl"}
+    ]
+    if not audio_files:
+        raise YouTubeLocalTranscriptionError("yt-dlp không tải được luồng audio của video")
+    return max(audio_files, key=lambda path: path.stat().st_size)
+
+
+def transcribe_youtube_audio_locally(audio_path: Path) -> list[dict]:
+    try:
+        segments, _info = get_youtube_whisper_model().transcribe(
+            str(audio_path),
+            language="en",
+            beam_size=5,
+            vad_filter=True,
+            condition_on_previous_text=False,
+        )
+        transcript = []
+        for segment in segments:
+            text = " ".join(str(segment.text or "").split())
+            if not text:
+                continue
+            start = max(0.0, float(segment.start or 0))
+            end = max(start, float(segment.end or start))
+            transcript.append({
+                "text": text,
+                "start": start,
+                "duration": end - start,
+            })
+    except YouTubeLocalTranscriptionError:
+        raise
+    except Exception as error:
+        raise YouTubeLocalTranscriptionError("Whisper không thể nhận dạng audio của video") from error
+
+    if not transcript:
+        raise YouTubeLocalTranscriptionError("Whisper không nhận dạng được câu tiếng Anh nào")
+    return transcript
+
+
+def fetch_youtube_transcript_locally(video_id: str) -> list[dict]:
+    with tempfile.TemporaryDirectory(prefix="minuslearn-whisper-") as temp_dir:
+        audio_path = download_youtube_audio(video_id, temp_dir)
+        return transcribe_youtube_audio_locally(audio_path)
+
+
+def fetch_youtube_transcript_with_api(video_id: str) -> list[dict]:
+    proxy_url = youtube_proxy_url()
+    transcript_api = YouTubeTranscriptApi(
+        proxy_config=GenericProxyConfig(http_url=proxy_url, https_url=proxy_url)
+    ) if proxy_url else YouTubeTranscriptApi()
+    return transcript_api.fetch(video_id, languages=YOUTUBE_TRANSCRIPT_LANGUAGES).to_raw_data()
+
+
+def is_youtube_ip_block(error: Exception) -> bool:
+    message = str(error).lower()
+    return isinstance(error, (IpBlocked, RequestBlocked)) or any(marker in message for marker in (
+        "http error 429",
+        "too many requests",
+        "blocking requests from your ip",
+        "requestblocked",
+        "ipblocked",
+    ))
+
+
+def fetch_youtube_caption_transcript(video_id: str) -> list[dict]:
+    settings = get_settings()
+    providers = (
+        (fetch_youtube_transcript_with_ytdlp, fetch_youtube_transcript_with_api)
+        if settings.youtube_cookies_file.strip()
+        else (fetch_youtube_transcript_with_api, fetch_youtube_transcript_with_ytdlp)
+    )
+    errors = []
+    for provider in providers:
+        try:
+            return provider(video_id)
+        except Exception as error:
+            errors.append(error)
+            if is_youtube_ip_block(error) and not (
+                settings.youtube_proxy_url.strip() or settings.youtube_cookies_file.strip()
+            ):
+                break
+
+    if any(is_youtube_ip_block(error) for error in errors):
+        raise YouTubeIpBlockedError(YOUTUBE_IP_BLOCK_MESSAGE) from errors[-1]
+    raise YouTubeTranscriptUnavailableError(
+        "Video không có phụ đề tiếng Anh khả dụng hoặc YouTube đã từ chối truy cập phụ đề."
+    ) from errors[-1]
+
+
+def fetch_youtube_transcript(video_id: str) -> list[dict]:
+    global youtube_caption_blocked_until
+    mode = youtube_transcript_mode()
+    caption_error = None
+
+    if mode != "local" and (
+        mode == "captions" or time.monotonic() >= youtube_caption_blocked_until
+    ):
+        try:
+            return fetch_youtube_caption_transcript(video_id)
+        except Exception as error:
+            caption_error = error
+            if is_youtube_ip_block(error) or isinstance(error, YouTubeIpBlockedError):
+                circuit_seconds = max(60, get_settings().youtube_transcript_cache_ttl_seconds)
+                youtube_caption_blocked_until = time.monotonic() + circuit_seconds
+            if mode == "captions":
+                raise
+
+    try:
+        return fetch_youtube_transcript_locally(video_id)
+    except Exception as local_error:
+        if is_youtube_ip_block(local_error):
+            raise YouTubeIpBlockedError(
+                "YouTube đang giới hạn cả luồng audio; local transcription chưa thể chạy."
+            ) from local_error
+        if caption_error:
+            raise YouTubeLocalTranscriptionError(
+                "Không lấy được caption và local Whisper cũng không thể tạo transcript."
+            ) from local_error
+        raise
+
+
+def get_cached_youtube_transcript(video_id: str) -> list[dict] | None:
+    cached = youtube_transcript_cache.get(video_id)
+    if not cached:
+        return None
+    cached_at, transcript = cached
+    if time.monotonic() - cached_at > max(0, get_settings().youtube_transcript_cache_ttl_seconds):
+        youtube_transcript_cache.pop(video_id, None)
+        return None
+    youtube_transcript_cache.move_to_end(video_id)
+    return deepcopy(transcript)
+
+
+def cache_youtube_transcript(video_id: str, transcript: list[dict]) -> None:
+    youtube_transcript_cache[video_id] = (time.monotonic(), deepcopy(transcript))
+    youtube_transcript_cache.move_to_end(video_id)
+    while len(youtube_transcript_cache) > YOUTUBE_TRANSCRIPT_CACHE_MAX_ITEMS:
+        youtube_transcript_cache.popitem(last=False)
+
+
+async def fetch_rate_limited_youtube_transcript(video_id: str) -> list[dict]:
+    cached = get_cached_youtube_transcript(video_id)
+    if cached is not None:
+        return cached
+
+    global youtube_last_request_started_at
+    async with youtube_request_lock:
+        cached = get_cached_youtube_transcript(video_id)
+        if cached is not None:
+            return cached
+
+        interval = max(0.0, get_settings().youtube_request_interval_seconds)
+        wait_seconds = interval - (time.monotonic() - youtube_last_request_started_at)
+        if wait_seconds > 0:
+            await asyncio.sleep(wait_seconds)
+        youtube_last_request_started_at = time.monotonic()
+        transcript = await asyncio.to_thread(fetch_youtube_transcript, video_id)
+        cache_youtube_transcript(video_id, transcript)
+        return transcript
 
 
 def playlist_video_urls(playlist_info: dict) -> list[str]:
@@ -172,13 +504,15 @@ async def extract_video_info(payload: dict = Body(...), user=Depends(get_current
     title, thumbnail = await fetch_youtube_metadata(parsed_video_id)
 
     try:
-        transcript = (
-            YouTubeTranscriptApi()
-            .fetch(parsed_video_id, languages=["en", "en-US", "en-GB"])
-            .to_raw_data()
-        )
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to extract transcript: {str(e)}") from e
+        transcript = await fetch_rate_limited_youtube_transcript(parsed_video_id)
+    except YouTubeIpBlockedError as error:
+        raise HTTPException(status_code=429, detail=str(error), headers={"Retry-After": "60"}) from error
+    except YouTubeTranscriptUnavailableError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except YouTubeLocalTranscriptionError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    except Exception as error:
+        raise HTTPException(status_code=502, detail="Không thể trích xuất phụ đề YouTube lúc này.") from error
 
     return {
         "videoId": parsed_video_id,
@@ -198,9 +532,15 @@ async def extract_playlist_items(payload: dict = Body(...), user=Depends(get_cur
     try:
         playlist_info = await asyncio.to_thread(fetch_youtube_playlist_info, playlist_url)
     except DownloadError as error:
-        raise HTTPException(status_code=400, detail=f"Failed to extract playlist: {error}") from error
+        if is_youtube_ip_block(error):
+            raise HTTPException(
+                status_code=429,
+                detail=YOUTUBE_IP_BLOCK_MESSAGE,
+                headers={"Retry-After": "60"},
+            ) from error
+        raise HTTPException(status_code=400, detail="Không thể lấy danh sách phát YouTube.") from error
     except Exception as error:
-        raise HTTPException(status_code=502, detail=f"Failed to extract playlist: {error}") from error
+        raise HTTPException(status_code=502, detail="Không thể kết nối YouTube để lấy danh sách phát.") from error
 
     urls = playlist_video_urls(playlist_info)
     if not urls:

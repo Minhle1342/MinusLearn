@@ -18,6 +18,15 @@ class Settings(BaseSettings):
     gemini_live_api_key: str = ""
     gemini_live_model: str = "gemini-3.1-flash-live-preview"
     gemini_live_token_timeout_seconds: float = 12.0
+    youtube_proxy_url: str = ""
+    youtube_cookies_file: str = ""
+    youtube_request_interval_seconds: float = 5.0
+    youtube_transcript_cache_ttl_seconds: int = 21_600
+    youtube_transcript_mode: str = "local"
+    youtube_whisper_model: str = "base.en"
+    youtube_whisper_device: str = "cpu"
+    youtube_whisper_compute_type: str = "int8"
+    youtube_whisper_max_duration_seconds: int = 7_200
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
