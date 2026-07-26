@@ -29,6 +29,8 @@ export function VideoLearningSidebar({
   onPause,
   onLoopLine,
   practiceShortcut,
+  isAutoScrollEnabled = true,
+  onToggleAutoScroll,
 }) {
   const [activeTab, setActiveTab] = useState('transcript');
   const [practiceRequest, setPracticeRequest] = useState({ activity: 'dictation', lineIndex: 0, nonce: 0 });
@@ -112,8 +114,25 @@ export function VideoLearningSidebar({
 
   return (
     <aside className="relative flex h-full min-h-0 w-full flex-col bg-surface" aria-label="English Video Learning Studio">
-      <div className="grid shrink-0 grid-cols-4 border-b border-hairline bg-surface" role="tablist">
-        {tabs.map(([value, label, icon]) => <button key={value} type="button" role="tab" aria-selected={activeTab === value} onClick={() => setActiveTab(value)} className={`flex min-w-0 flex-col items-center gap-0.5 border-b-2 px-xs py-sm text-[10px] font-medium transition-colors sm:text-[11px] ${activeTab === value ? 'border-primary text-primary' : 'border-transparent text-on-surface-variant hover:text-on-surface'}`}><span className="material-symbols-outlined text-[19px]">{icon}</span><span className="truncate">{label}</span></button>)}
+      <div className="flex shrink-0 border-b border-hairline bg-surface" role="tablist">
+        <div className="grid flex-1 min-w-0 grid-cols-4">
+          {tabs.map(([value, label, icon]) => <button key={value} type="button" role="tab" aria-selected={activeTab === value} onClick={() => setActiveTab(value)} className={`flex min-w-0 flex-col items-center gap-0.5 border-b-2 px-xs py-sm text-[10px] font-medium transition-colors sm:text-[11px] ${activeTab === value ? 'border-primary text-primary' : 'border-transparent text-on-surface-variant hover:text-on-surface'}`}><span className="material-symbols-outlined text-[19px]">{icon}</span><span className="truncate">{label}</span></button>)}
+        </div>
+        {onToggleAutoScroll && (
+          <button
+            type="button"
+            onClick={onToggleAutoScroll}
+            aria-pressed={isAutoScrollEnabled}
+            title={isAutoScrollEnabled ? 'Tắt tự động cuộn theo timeline' : 'Bật tự động cuộn theo timeline'}
+            className={`flex w-10 shrink-0 items-center justify-center border-b-2 border-l border-hairline transition-colors ${
+              isAutoScrollEnabled
+                ? 'border-b-primary text-primary'
+                : 'border-b-transparent text-on-surface-variant hover:text-on-surface'
+            }`}
+          >
+            <span className="material-symbols-outlined text-[19px]">{isAutoScrollEnabled ? 'swap_vert' : 'sync_disabled'}</span>
+          </button>
+        )}
       </div>
       {learning.loading && <div className="absolute inset-x-0 top-[54px] z-20 h-0.5 overflow-hidden bg-primary/20"><div className="h-full w-1/2 animate-pulse bg-primary" /></div>}
       {learning.error && <div className="shrink-0 bg-error/10 px-sm py-xs text-[11px] text-error">Không thể đồng bộ một phần tiến độ: {learning.error.message}</div>}

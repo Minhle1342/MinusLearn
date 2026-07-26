@@ -222,6 +222,7 @@ export function VideoDetail({
   const [temporaryPlaybackRate, setTemporaryPlaybackRate] = useState(null);
   const [practiceShortcut, setPracticeShortcut] = useState({ activity: null, lineIndex: -1, nonce: 0 });
   const [learningSidebarWidth, setLearningSidebarWidth] = useState(getInitialLearningSidebarWidth);
+  const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true);
   const learning = useVideoLearningState(videoId);
   const playerRef = useRef(null);
   const mainContentRef = useRef(null);
@@ -581,6 +582,8 @@ export function VideoDetail({
   }, [activeTranscriptIndex, learningPreferences.subtitleOffset, subtitleMode, videoId]);
 
   useEffect(() => {
+    if (!isAutoScrollEnabled) return;
+
     const panel = transcriptPanelRef.current;
     const activeLine = transcriptLineRefs.current[activeTranscriptIndex];
     if (!panel || !activeLine) return;
@@ -597,7 +600,7 @@ export function VideoDetail({
         behavior: 'smooth'
       });
     }
-  }, [activeTranscriptIndex]);
+  }, [activeTranscriptIndex, isAutoScrollEnabled]);
 
   if (!video) {
     return (
@@ -1487,6 +1490,8 @@ export function VideoDetail({
             onPause={() => setIsPlaying(false)}
             onLoopLine={loopSpecificLine}
             practiceShortcut={practiceShortcut}
+            isAutoScrollEnabled={isAutoScrollEnabled}
+            onToggleAutoScroll={() => setIsAutoScrollEnabled(current => !current)}
           />
         </div>
       </div>
