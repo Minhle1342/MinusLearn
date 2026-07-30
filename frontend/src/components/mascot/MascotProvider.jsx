@@ -23,15 +23,10 @@ import { useAudioFocus } from '../../contexts/AudioFocusContext';
 import {
   chatWithMascot,
   clearMascotHistory,
+  getMascotSpeech,
   getMascotHealth,
   getMascotHistory,
-  saveMascotLiveTurn,
 } from '../../services/mascotApi';
-import {
-  GeminiLiveSession,
-  getGeminiLiveErrorMessage,
-  isGeminiLiveSupported,
-} from '../../services/geminiLive';
 import { getSelectedVoiceForLanguage } from '../../utils/speech';
 import { AUDIO_FOCUS_EVENT, setLearningAudioFocus } from '../../utils/audioFocus';
 import {
@@ -93,14 +88,15 @@ export function MascotProvider({
   const [loading, setLoading] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [health, setHealth] = useState(null);
-  const [liveVoiceState, setLiveVoiceState] = useState('idle');
-  const [liveVoiceError, setLiveVoiceError] = useState('');
+  const [listening, setListening] = useState(false);
   const [position, setPosition] = useState(() => readMascotPosition(window.innerWidth, window.innerHeight));
   const dragRef = useRef(null);
   const suppressClickRef = useRef(false);
   const mascotUtteranceRef = useRef(null);
-  const narrationSessionRef = useRef(null);
-  const liveSessionRef = useRef(null);
+  const speechAudioRef = useRef(null);
+  const speechAudioUrlRef = useRef(null);
+  const speechRequestIdRef = useRef(0);
+  const recognitionRef = useRef(null);
   const pendingSpeechRef = useRef(null);
   const bubbleTimerRef = useRef(null);
   const proactiveTimerRef = useRef(null);
@@ -122,22 +118,24 @@ export function MascotProvider({
 
   const stopMascotSpeech = useCallback((clearPending = true) => {
     if (clearPending) pendingSpeechRef.current = null;
-    if (narrationSessionRef.current) {
-      narrationSessionRef.current.close();
-      narrationSessionRef.current = null;
-    }
-    if (liveSessionRef.current) {
-      liveSessionRef.current.stopPlayback();
-      setLiveVoiceState('listening');
-    }
+    speechRequestIdRef.current += 1;
     if (mascotUtteranceRef.current && window.speechSynthesis) {
       mascotUtteranceRef.current = null;
       window.speechSynthesis.cancel();
     }
+    if (speechAudioRef.current) {
+      speechAudioRef.current.pause();
+      speechAudioRef.current = null;
+    }
+    if (speechAudioUrlRef.current) {
+      URL.revokeObjectURL(speechAudioUrlRef.current);
+      speechAudioUrlRef.current = null;
+    }
+    setLearningAudioFocus('mascot-edge-tts', false);
     setTalking(false);
   }, []);
 
-  const playBrowserSpeech = useCallback(response => {
+  const playSystemSpeech = useCallback(response => {
     if (!autoSpeak || !response?.text || !window.speechSynthesis || isLearningAudioActive) {
       if (response?.text && autoSpeak) pendingSpeechRef.current = response;
       return;
@@ -164,48 +162,64 @@ export function MascotProvider({
     window.speechSynthesis.speak(utterance);
   }, [autoSpeak, isLearningAudioActive, settings?.mascotVietnameseVoiceURI, settings?.speechVoiceURI]);
 
-  const playSpeech = useCallback(response => {
+  const playMinoSpeech = useCallback(async response => {
     if (!autoSpeak || !response?.text || isLearningAudioActive) {
       if (response?.text && autoSpeak) pendingSpeechRef.current = response;
       return;
     }
-
-    const useGeminiVoice = response.language === 'vi'
-      && settings?.mascotLiveVoiceEnabled !== false
-      && health?.liveVoiceConfigured
-      && isGeminiLiveSupported();
-    if (!useGeminiVoice) {
-      playBrowserSpeech(response);
+    if (response.language !== 'vi') {
+      playSystemSpeech(response);
       return;
     }
 
-    narrationSessionRef.current?.close();
-    const session = new GeminiLiveSession({
-      voiceName: settings?.mascotGeminiVoice || 'Aoede',
-      context: clientContext(),
-      onState: state => {
-        if (narrationSessionRef.current === session) setTalking(state === 'speaking');
-      },
-      onPlaybackEnd: () => {
-        if (narrationSessionRef.current !== session) return;
-        session.close();
-        narrationSessionRef.current = null;
+    const requestId = ++speechRequestIdRef.current;
+    if (mascotUtteranceRef.current && window.speechSynthesis) {
+      mascotUtteranceRef.current = null;
+      window.speechSynthesis.cancel();
+    }
+    if (speechAudioRef.current) speechAudioRef.current.pause();
+    setLearningAudioFocus('mascot-edge-tts', false);
+    if (speechAudioUrlRef.current) URL.revokeObjectURL(speechAudioUrlRef.current);
+    speechAudioRef.current = null;
+    speechAudioUrlRef.current = null;
+
+    try {
+      const audioBlob = await getMascotSpeech(response.text);
+      if (requestId !== speechRequestIdRef.current) return;
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      speechAudioRef.current = audio;
+      speechAudioUrlRef.current = audioUrl;
+      const release = () => {
+        if (speechAudioRef.current !== audio) return;
+        speechAudioRef.current = null;
+        speechAudioUrlRef.current = null;
+        URL.revokeObjectURL(audioUrl);
+        setLearningAudioFocus('mascot-edge-tts', false);
         setTalking(false);
-      },
-    });
-    narrationSessionRef.current = session;
-    pendingSpeechRef.current = null;
-    let fallbackStarted = false;
-    const fallback = () => {
-      if (fallbackStarted || narrationSessionRef.current !== session) return;
-      fallbackStarted = true;
-      session.close();
-      narrationSessionRef.current = null;
-      playBrowserSpeech(response);
-    };
-    session.onError = fallback;
-    session.speakText(response.text).catch(fallback);
-  }, [autoSpeak, clientContext, health?.liveVoiceConfigured, isLearningAudioActive, playBrowserSpeech, settings?.mascotGeminiVoice, settings?.mascotLiveVoiceEnabled]);
+      };
+      audio.onplay = () => {
+        setLearningAudioFocus('mascot-edge-tts', true);
+        setTalking(true);
+      };
+      audio.onended = release;
+      audio.onerror = release;
+      pendingSpeechRef.current = null;
+      await audio.play();
+    } catch {
+      if (requestId === speechRequestIdRef.current) {
+        speechAudioRef.current?.pause();
+        speechAudioRef.current = null;
+        if (speechAudioUrlRef.current) URL.revokeObjectURL(speechAudioUrlRef.current);
+        speechAudioUrlRef.current = null;
+        setLearningAudioFocus('mascot-edge-tts', false);
+        setTalking(false);
+        playSystemSpeech(response);
+      }
+    }
+  }, [autoSpeak, isLearningAudioActive, playSystemSpeech]);
+
+  const playSpeech = playMinoSpeech;
 
   const presentResponse = useCallback(response => {
     setLastResponse(response);
@@ -237,8 +251,8 @@ export function MascotProvider({
 
   useEffect(() => {
     const interruptForLearningAudio = event => {
-      if (!event.detail?.active || event.detail?.source === 'mascot-live') return;
-      if (!mascotUtteranceRef.current && !narrationSessionRef.current) return;
+      if (!event.detail?.active || event.detail?.source === 'mascot-microphone') return;
+      if (!mascotUtteranceRef.current && !speechAudioRef.current) return;
       pendingSpeechRef.current = lastResponse;
       stopMascotSpeech(false);
     };
@@ -260,7 +274,7 @@ export function MascotProvider({
     try {
       const response = await chatWithMascot(message, trigger, clientContext(event));
       if (response.source === 'qwen') {
-        setHealth({ online: true, modelAvailable: true, model: 'qwen2.5:1.5b' });
+        setHealth(current => ({ ...current, online: true, modelAvailable: true, model: 'qwen2.5:1.5b' }));
       }
       if (trigger === 'user') {
         setMessages(current => [...current, { role: 'assistant', text: response.text }]);
@@ -454,76 +468,64 @@ export function MascotProvider({
     setBubble(null);
   };
 
-  const stopLiveConversation = useCallback(() => {
-    liveSessionRef.current?.close();
-    liveSessionRef.current = null;
-    setLearningAudioFocus('mascot-live', false);
-    setLiveVoiceState('idle');
-    setLiveVoiceError('');
-    setTalking(false);
+  const speechRecognitionSupported = typeof window !== 'undefined'
+    && Boolean(window.SpeechRecognition || window.webkitSpeechRecognition);
+
+  const stopVoiceInput = useCallback(() => {
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
+    setLearningAudioFocus('mascot-microphone', false);
+    setListening(false);
     setEmotion('neutral');
   }, []);
 
-  const startLiveConversation = useCallback(async () => {
-    if (liveSessionRef.current) {
-      stopLiveConversation();
+  const toggleVoiceInput = useCallback(() => {
+    if (recognitionRef.current) {
+      stopVoiceInput();
       return;
     }
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Recognition) return;
+
     stopMascotSpeech();
-    setLiveVoiceError('');
-    setLearningAudioFocus('mascot-live', true);
-    const session = new GeminiLiveSession({
-      voiceName: settings?.mascotGeminiVoice || 'Aoede',
-      context: clientContext(),
-      onState: state => {
-        if (liveSessionRef.current !== session) return;
-        setLiveVoiceState(state);
-        setTalking(state === 'speaking');
-        if (state === 'speaking') setEmotion('happy');
-        if (state === 'listening') setEmotion('thinking');
-      },
-      onTurn: ({ inputText, outputText }) => {
-        if (liveSessionRef.current !== session) return;
-        if (inputText) setMessages(current => [...current, { role: 'user', text: inputText }]);
-        if (outputText) {
-          setMessages(current => [...current, { role: 'assistant', text: outputText }]);
-          setLastResponse({ text: outputText, language: 'vi', emotion: 'happy', quickReplies: [] });
-          setBubble(outputText);
-        }
-        if (inputText && outputText) saveMascotLiveTurn(inputText, outputText).catch(() => {});
-      },
-      onError: error => {
-        if (liveSessionRef.current !== session) return;
-        setLearningAudioFocus('mascot-live', false);
-        setTalking(false);
-        setEmotion('concerned');
-        setLiveVoiceState('error');
-        setLiveVoiceError(getGeminiLiveErrorMessage(error));
-        liveSessionRef.current = null;
-      },
-    });
-    liveSessionRef.current = session;
-    try {
-      await session.connect({ microphone: true });
-    } catch {
-      // The session callback already exposes a safe user-facing state.
-    }
-  }, [clientContext, settings?.mascotGeminiVoice, stopLiveConversation, stopMascotSpeech]);
+    const recognition = new Recognition();
+    recognition.lang = 'vi-VN';
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.onstart = () => {
+      if (recognitionRef.current !== recognition) return;
+      setLearningAudioFocus('mascot-microphone', true);
+      setListening(true);
+      setEmotion('thinking');
+    };
+    recognition.onresult = event => {
+      const transcript = Array.from(event.results || [])
+        .map(result => result?.[0]?.transcript || '')
+        .join(' ')
+        .trim();
+      if (transcript) setInput(transcript);
+    };
+    recognition.onerror = () => {
+      if (recognitionRef.current === recognition) setEmotion('concerned');
+    };
+    recognition.onend = () => {
+      if (recognitionRef.current !== recognition) return;
+      recognitionRef.current = null;
+      setLearningAudioFocus('mascot-microphone', false);
+      setListening(false);
+      setEmotion('neutral');
+    };
+    recognitionRef.current = recognition;
+    recognition.start();
+  }, [stopMascotSpeech, stopVoiceInput]);
 
-  useEffect(() => () => stopLiveConversation(), [stopLiveConversation]);
+  useEffect(() => () => stopVoiceInput(), [stopVoiceInput]);
 
-  const liveVoiceActive = ['connecting', 'listening', 'speaking'].includes(liveVoiceState);
-  const modelStatus = liveVoiceState === 'connecting'
-    ? 'Đang kết nối Gemini Live...'
-    : liveVoiceState === 'listening'
-      ? 'Gemini Live đang nghe'
-      : liveVoiceState === 'speaking'
-        ? 'Mino đang nói'
-        : liveVoiceState === 'error'
-          ? 'Gemini Live gặp lỗi'
-          : health?.online && health?.modelAvailable
-            ? 'Qwen local sẵn sàng'
-            : 'Chế độ offline';
+  const modelStatus = listening
+    ? 'Đang nghe để nhập tin nhắn...'
+    : health?.online && health?.modelAvailable
+      ? 'Qwen local sẵn sàng'
+      : 'Chế độ offline';
 
   const handleClearHistory = async () => {
     await clearMascotHistory();
@@ -561,7 +563,7 @@ export function MascotProvider({
                   <div className="min-w-0">
                     <h2 className="text-body-md font-semibold text-on-surface">Mino</h2>
                     <p className="flex items-center gap-1 text-[11px] text-on-surface-variant">
-                      {liveVoiceActive || (health?.online && health?.modelAvailable) ? <Wifi size={12} /> : <WifiOff size={12} />}
+                      {health?.online && health?.modelAvailable ? <Wifi size={12} /> : <WifiOff size={12} />}
                       {modelStatus}
                     </p>
                   </div>
@@ -572,14 +574,6 @@ export function MascotProvider({
                   <button type="button" className="mino-icon-button" onClick={() => setIsOpen(false)} title="Đóng"><X size={18} /></button>
                 </div>
               </header>
-
-              {liveVoiceState === 'error' && liveVoiceError && (
-                <div className="mino-live-error" role="alert">
-                  <WifiOff size={14} />
-                  <span>{liveVoiceError}</span>
-                  <button type="button" onClick={startLiveConversation}>Thử lại</button>
-                </div>
-              )}
 
               <div className="mino-chat-messages">
                 {!historyLoaded && <p className="mino-chat-status"><History size={15} /> Đang tải cuộc trò chuyện...</p>}
@@ -631,12 +625,12 @@ export function MascotProvider({
                 />
                 <button
                   type="button"
-                  className={liveVoiceActive ? 'text-error' : ''}
-                  onClick={startLiveConversation}
-                  disabled={!health?.liveVoiceConfigured || !isGeminiLiveSupported()}
-                  title={liveVoiceActive ? 'Dừng trò chuyện trực tiếp' : 'Trò chuyện trực tiếp với Mino'}
+                  className={listening ? 'text-error' : ''}
+                  onClick={toggleVoiceInput}
+                  disabled={!speechRecognitionSupported}
+                  title={listening ? 'Dừng nhập bằng giọng nói' : 'Nhập bằng giọng nói'}
                 >
-                  {liveVoiceActive ? <Square size={18} /> : <Mic size={19} />}
+                  {listening ? <Square size={18} /> : <Mic size={19} />}
                 </button>
                 {lastResponse && <button type="button" onClick={() => playSpeech(lastResponse)} title="Đọc lại"><Volume2 size={19} /></button>}
                 <button type="submit" disabled={!input.trim() || loading} title="Gửi"><Send size={19} /></button>

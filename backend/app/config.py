@@ -15,9 +15,6 @@ class Settings(BaseSettings):
     mascot_model: str = "qwen2.5:1.5b"
     mascot_timeout_seconds: float = 30.0
     mascot_max_tokens: int = 220
-    gemini_live_api_key: str = ""
-    gemini_live_model: str = "gemini-3.1-flash-live-preview"
-    gemini_live_token_timeout_seconds: float = 12.0
     youtube_proxy_url: str = ""
     youtube_cookies_file: str = ""
     youtube_request_interval_seconds: float = 5.0

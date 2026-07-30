@@ -45,9 +45,7 @@ function LearningApp() {
     mascotEnabled: true,
     mascotProactivity: 'timed',
     mascotAutoSpeak: true,
-    mascotVietnameseVoiceURI: '',
-    mascotLiveVoiceEnabled: true,
-    mascotGeminiVoice: 'Aoede'
+    mascotVietnameseVoiceURI: ''
   });
   const [srData, setSrData] = useRemoteStorage('minuslearn_sr_data', {});
 

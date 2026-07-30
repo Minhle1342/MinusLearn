@@ -20,8 +20,13 @@ import {
 } from '../../services/speechAssessment';
 import { useRemoteStorage } from '../../hooks/useRemoteStorage';
 import { speakEnglishText, getEnglishVoices, getSelectedEnglishVoice } from '../../utils/speech';
-import { evaluateSpeakingPractice } from '../../services/api';
-import { chatWithMascot } from '../../services/mascotApi';
+import {
+  chatWithNPC,
+  evaluateSpeakingPractice,
+  GEMINI_DEFAULT_KEY,
+  GEMINI_DEFAULT_MODEL,
+  generateSpeakingScenario,
+} from '../../services/api';
 import { recordReview } from '../../utils/spacedRepetition';
 import { setLearningAudioFocus } from '../../utils/audioFocus';
 import { useMascot } from '../mascot/MascotProvider';
@@ -172,15 +177,15 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
       
       try {
         const topicName = currentTopic?.name || 'General';
-        const scenario = await chatWithMascot(
-          `Start a natural English role-play about ${topicName}. You are Mino. Set the scene briefly and say the first line in English.`,
-          'event',
-          {
-            activePage: 'speaking',
-            topicId: activeTopicId,
-            event: { type: 'roleplay_start', detail: `Topic: ${topicName}` },
-          },
+        const apiKey = GEMINI_DEFAULT_KEY || settings?.apiKey;
+        if (!apiKey) throw new Error('Chưa có Gemini API Key trong file .env hoặc Cài đặt');
+        const scenario = await generateSpeakingScenario(
+          topicWords,
+          topicName,
+          apiKey,
+          GEMINI_DEFAULT_MODEL,
         );
+        if (!scenario?.npc_first_line) throw new Error('Gemini chưa tạo được câu mở đầu cho Mino');
         
         const voices = getEnglishVoices();
         const shuffledVoices = [...voices].sort(() => 0.5 - Math.random());
@@ -190,11 +195,11 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
           });
         }
 
-        setAiSituation(`Role-play cùng Mino về chủ đề ${topicName}`);
+        setAiSituation(scenario.situation || `Role-play cùng Mino về chủ đề ${topicName}`);
         setAiChatHistory([{
           speaker: 'Mino',
-          text: scenario.text,
-          emotion: scenario.emotion || 'neutral',
+          text: scenario.npc_first_line,
+          emotion: scenario.npc_first_emotion || 'neutral',
           isUserTurn: false
         }]);
         
@@ -202,7 +207,7 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
         
         // Auto play first line
         setTimeout(() => {
-          speakDialogueLine({ text: scenario.text, speaker: 'Mino' });
+          speakDialogueLine({ text: scenario.npc_first_line, speaker: 'Mino' });
         }, 500);
       } catch (err) {
         setErrorMessage(err.message || 'Lỗi tạo tình huống. Hãy thử lại.');
@@ -343,14 +348,17 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
       setLiveTranscript('');
       setIsWaitingForAI(true);
       
-      const recentHistory = newHistory.slice(-4).map(msg => `${msg.speaker}: ${msg.text}`).join('\n');
-      const reply = await chatWithMascot(
-        result.transcript,
-        'event',
+      const topicName = currentTopic?.name || 'General';
+      const apiKey = GEMINI_DEFAULT_KEY || settings?.apiKey;
+      if (!apiKey) throw new Error('Chưa có Gemini API Key trong file .env hoặc Cài đặt');
+      const recentHistory = newHistory.slice(-8).map(msg => `${msg.speaker}: ${msg.text}`).join('\n');
+      const reply = await chatWithNPC(
+        recentHistory,
+        apiKey,
+        GEMINI_DEFAULT_MODEL,
         {
-          activePage: 'speaking',
-          topicId: activeTopicId,
-          event: { type: 'roleplay_turn', detail: recentHistory },
+          topicName,
+          vocabulary: topicWords.map(word => word.word).filter(Boolean),
         },
       );
       
@@ -381,7 +389,9 @@ export function SpeakingPractice({ words, activeTopicId, topics, settings, onOpe
     setPhase('ai_evaluating');
     try {
       const fullHistoryText = aiChatHistory.map(msg => `${msg.speaker}: ${msg.text}`).join('\n');
-      const feedback = await evaluateSpeakingPractice(fullHistoryText, settings.apiKey, settings.model);
+      const apiKey = GEMINI_DEFAULT_KEY || settings?.apiKey;
+      if (!apiKey) throw new Error('Chưa có Gemini API Key trong file .env hoặc Cài đặt');
+      const feedback = await evaluateSpeakingPractice(fullHistoryText, apiKey, GEMINI_DEFAULT_MODEL);
       setAiFeedback(feedback);
       
       // We can also trigger SRS logic here if needed, but since it's unscripted, 

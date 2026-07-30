@@ -64,13 +64,5 @@ class MascotChatResponse(BaseModel):
     source: Literal["qwen", "fallback"] = "qwen"
 
 
-class MascotLiveTokenResponse(BaseModel):
-    token: str
-    model: str
-    websocketUrl: str
-    expiresAt: str
-
-
-class MascotLiveHistoryRequest(BaseModel):
-    userText: str = Field(min_length=1, max_length=1500)
-    assistantText: str = Field(min_length=1, max_length=1500)
+class MascotSpeechRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=1500)

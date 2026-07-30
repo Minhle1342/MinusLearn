@@ -21,13 +21,9 @@ export function chatWithMascot(message, trigger, context) {
   });
 }
 
-export function createMascotLiveToken() {
-  return apiRequest('/api/mascot/live-token', { method: 'POST' });
-}
-
-export function saveMascotLiveTurn(userText, assistantText) {
-  return apiRequest('/api/mascot/live-history', {
+export function getMascotSpeech(text) {
+  return apiRequest('/api/mascot/speech', {
     method: 'POST',
-    body: { userText, assistantText },
+    body: { text },
   });
 }

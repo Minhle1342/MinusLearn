@@ -1,14 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 
 from ..config import get_settings
 from ..dependencies import get_current_user, get_database
 from ..schemas import (
     MascotChatRequest,
     MascotChatResponse,
-    MascotLiveHistoryRequest,
-    MascotLiveTokenResponse,
+    MascotSpeechRequest,
 )
-from ..services.gemini_live_service import create_live_token
+from ..services.edge_tts_service import MINO_VIETNAMESE_VOICE, synthesize_mino_speech
 from ..services.mascot_service import (
     append_history,
     build_study_context,
@@ -29,15 +28,32 @@ async def mascot_health(user=Depends(get_current_user)):
     result = await check_ollama(settings)
     return {
         **result,
-        "liveVoiceConfigured": bool(settings.gemini_live_api_key.strip()),
-        "liveVoiceModel": settings.gemini_live_model,
+        "speechProvider": "edge-tts",
+        "speechVoice": MINO_VIETNAMESE_VOICE,
     }
 
 
-@router.post("/live-token", response_model=MascotLiveTokenResponse)
-async def mascot_live_token(user=Depends(get_current_user)):
+@router.post("/speech")
+async def mascot_speech(
+    payload: MascotSpeechRequest,
+    user=Depends(get_current_user),
+):
     del user
-    return await create_live_token(get_settings())
+    try:
+        audio = await synthesize_mino_speech(payload.text.strip())
+    except Exception as error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Không thể tạo giọng Nam Minh lúc này",
+        ) from error
+    return Response(
+        content=audio,
+        media_type="audio/mpeg",
+        headers={
+            "Cache-Control": "private, max-age=86400",
+            "X-TTS-Voice": MINO_VIETNAMESE_VOICE,
+        },
+    )
 
 
 @router.get("/history")
@@ -71,15 +87,3 @@ async def mascot_chat(
             {"role": "assistant", "text": reply.text},
         ])
     return reply
-
-
-@router.post("/live-history", status_code=status.HTTP_204_NO_CONTENT)
-async def mascot_live_history(
-    payload: MascotLiveHistoryRequest,
-    user=Depends(get_current_user),
-    database=Depends(get_database),
-):
-    await append_history(database, user["userId"], [
-        {"role": "user", "text": payload.userText.strip()},
-        {"role": "assistant", "text": payload.assistantText.strip()},
-    ])

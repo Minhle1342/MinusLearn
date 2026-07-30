@@ -2,10 +2,16 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Volume2, Play, RotateCcw, Check, X, CheckCircle2, XCircle, Loader2, BookOpen, Clock, FileText } from 'lucide-react';
 import { useRemoteStorage } from '../../hooks/useRemoteStorage';
 import { speakEnglishText } from '../../utils/speech';
-import { generateIELTSListeningTest } from '../../services/api';
+import { GEMINI_DEFAULT_KEY, GEMINI_DEFAULT_MODEL, generateIELTSListeningTest } from '../../services/api';
 import { recordReview } from '../../utils/spacedRepetition';
 import { setLearningAudioFocus } from '../../utils/audioFocus';
 import { useMascot } from '../mascot/MascotProvider';
+
+
+export function resolveListeningGeminiModel() {
+  return GEMINI_DEFAULT_MODEL;
+}
+
 
 export function ListeningPractice({ words, activeTopicId, topics, settings, setSrData }) {
   const { emitMascotEvent } = useMascot();
@@ -81,9 +87,9 @@ export function ListeningPractice({ words, activeTopicId, topics, settings, setS
     setTimeLeft(2 * 60);
 
     try {
-      const apiKey = settings?.apiKey;
-      const model = settings?.model || 'gemini-1.5-flash';
-      if (!apiKey) throw new Error('Vui lòng thiết lập API Key trong Cài đặt');
+      const apiKey = GEMINI_DEFAULT_KEY || settings?.apiKey;
+      const model = resolveListeningGeminiModel();
+      if (!apiKey) throw new Error('Chưa có Gemini API Key trong file .env hoặc Cài đặt');
 
       const test = await generateIELTSListeningTest(topicWords, difficulty, apiKey, model);
       if (!test || !test.questions) throw new Error('Dữ liệu bài thi không hợp lệ');

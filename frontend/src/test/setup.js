@@ -31,4 +31,6 @@ globalThis.PointerEvent = MouseEvent;
 
 URL.createObjectURL = vi.fn(() => 'blob:test');
 URL.revokeObjectURL = vi.fn();
+HTMLMediaElement.prototype.play = vi.fn(() => Promise.resolve());
+HTMLMediaElement.prototype.pause = vi.fn();
 HTMLElement.prototype.scrollTo = vi.fn();

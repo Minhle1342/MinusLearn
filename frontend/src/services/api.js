@@ -375,16 +375,21 @@ Evaluate both tasks now.`;
 }
 
 export async function generateSpeakingScenario(wordList, topicName, apiKey, model) {
-  const words = wordList.map(w => w.word).join(', ');
-  const prompt = `Create a short English speaking practice scenario for a student about the topic: "${topicName}". 
-Try to incorporate some of these words if natural: ${words}.
-You are an NPC in this scenario.
+  const words = wordList
+    .filter(word => word?.word)
+    .slice(0, 30)
+    .map(word => `${word.word}${word.meaning ? ` (${word.meaning})` : ''}`)
+    .join(', ');
+  const prompt = `Create one specific English speaking role-play grounded in the selected topic: "${topicName}".
+The available topic vocabulary is: ${words || 'No vocabulary supplied'}.
+Mino is the only NPC and must remain named Mino. Choose a concrete everyday situation that clearly belongs to the selected topic, not a generic greeting.
+Naturally use at least one supplied vocabulary word in Mino's first line and ask a question that encourages the learner to use more of the supplied vocabulary.
 Return ONLY JSON with this schema:
 {
-  "situation": "Short description of the situation in Vietnamese (e.g. Bạn đang ở nhà hàng...)",
-  "npc_name": "Name of the NPC (e.g. Waiter, John)",
+  "situation": "A specific short description in Vietnamese tied to the selected topic",
+  "npc_name": "Mino",
   "npc_first_line": "The first English sentence spoken by the NPC to start the conversation",
-  "npc_first_emotion": "The emotion of the NPC (happy, sad, surprised, thinking, neutral, excited, confused)"
+  "npc_first_emotion": "happy|surprised|thinking|neutral|excited|confused"
 }`;
 
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model || GEMINI_DEFAULT_MODEL}:generateContent?key=${apiKey || GEMINI_DEFAULT_KEY}`, {
@@ -405,15 +410,19 @@ Return ONLY JSON with this schema:
   return JSON.parse(text);
 }
 
-export async function chatWithNPC(recentHistory, apiKey, model) {
+export async function chatWithNPC(recentHistory, apiKey, model, context = {}) {
+  const topicName = String(context.topicName || 'General');
+  const vocabulary = Array.isArray(context.vocabulary)
+    ? context.vocabulary.filter(Boolean).slice(0, 30).join(', ')
+    : '';
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model || GEMINI_DEFAULT_MODEL}:generateContent?key=${apiKey || GEMINI_DEFAULT_KEY}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       systemInstruction: {
-        parts: [{ text: "You are an English conversational partner for a student. Behave exactly like a real human. Use natural language, conversational fillers (like um, well, ah), occasional slang, and ask engaging questions. Have a distinct personality. DO NOT act like an AI tutor. DO NOT point out grammar or pronunciation mistakes. Keep your response under 3 sentences. Return JSON with schema: { \"text\": \"your english response\", \"emotion\": \"happy|sad|surprised|thinking|neutral|excited|confused\" }" }]
+        parts: [{ text: `You are Mino, the only NPC in an English role-play about "${topicName}". Stay inside the same concrete scenario and never change your name or become a generic assistant. The target vocabulary is: ${vocabulary || 'none supplied'}. Naturally reuse or elicit relevant target words when the conversation allows. Respond to the learner's latest turn, use 1-2 natural English sentences, and end with one engaging question. Do not correct or grade the learner during the role-play. Return JSON with schema: { "text": "your English response", "emotion": "happy|surprised|thinking|neutral|excited|confused" }` }]
       },
-      contents: recentHistory,
+      contents: [{ parts: [{ text: `Conversation so far:\n${recentHistory}` }] }],
       generationConfig: { 
         temperature: 0.7,
         responseMimeType: "application/json"
@@ -526,7 +535,8 @@ Do NOT include Markdown formatting outside the JSON block.`;
 export async function generateIELTSListeningTest(wordList, difficulty, apiKey, model) {
   const wordSummary = wordList.map(w => `${w.word}:${w.meaning}`).join(' | ');
   
-  const systemInstruction = `You are an IELTS Academic Listening examiner.
+  const systemInstruction = `You are Gemini, generating an IELTS Academic Listening exercise for MinusLearn.
+The narrator NPC is Mino, the learner's friendly English coach. Keep Mino as the speaker without changing the NPC's identity or personality.
 Generate a Mini IELTS Listening test (1 section, roughly 10-15 questions).
 The audio transcript MUST be an academic monologue (similar to Part 4) and roughly 500-700 words.
 Incorporate as many of these words as possible naturally: ${wordSummary}.

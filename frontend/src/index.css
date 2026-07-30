@@ -217,22 +217,6 @@
     @apply flex h-[62px] shrink-0 items-center justify-between border-b border-hairline bg-surface-container-lowest px-md;
   }
 
-  .mino-live-error {
-    @apply flex shrink-0 items-start gap-xs border-b border-error/30 bg-error/10 px-sm py-xs text-[11px] leading-4 text-error;
-  }
-
-  .mino-live-error svg {
-    @apply mt-[1px] shrink-0;
-  }
-
-  .mino-live-error span {
-    @apply min-w-0 flex-1 break-words;
-  }
-
-  .mino-live-error button {
-    @apply shrink-0 font-semibold underline;
-  }
-
   .mino-icon-button {
     @apply flex h-8 w-8 items-center justify-center rounded-[6px] text-on-surface-variant hover:bg-surface-container-low hover:text-primary focus:outline-none focus:ring-2 focus:ring-primary;
   }

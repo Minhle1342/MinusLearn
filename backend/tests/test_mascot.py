@@ -2,13 +2,10 @@ import asyncio
 from copy import deepcopy
 
 import httpx
-import pytest
-from fastapi import HTTPException
 
 from app.config import Settings
 from app.services import mascot_service
-from app.services import gemini_live_service
-from app.services.gemini_live_service import create_live_token
+from app.services import edge_tts_service
 from app.services.mascot_service import (
     apply_response_guardrails,
     append_history,
@@ -225,47 +222,19 @@ def test_health_reports_offline_without_raising(monkeypatch):
     asyncio.run(scenario())
 
 
-def test_live_token_is_short_lived_and_hides_api_key(monkeypatch):
-    captured = {}
+def test_mino_speech_uses_namminh_male_voice(monkeypatch):
+    class FakeCommunicate:
+        def __init__(self, text, voice, rate):
+            assert text == 'Xin chào từ Mino'
+            assert voice == 'vi-VN-NamMinhNeural'
+            assert rate == '+0%'
 
-    class Response:
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return {'name': 'ephemeral-token'}
-
-    class Client:
-        def __init__(self, **_kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *_args):
-            return None
-
-        async def post(self, url, headers, json):
-            captured.update({'url': url, 'headers': headers, 'json': json})
-            return Response()
+        async def stream(self):
+            yield {'type': 'audio', 'data': b'mp3-audio'}
 
     async def scenario():
-        monkeypatch.setattr(gemini_live_service.httpx, 'AsyncClient', Client)
-        result = await create_live_token(Settings(gemini_live_api_key='server-secret'))
-        assert result['token'] == 'ephemeral-token'
-        assert result['model'] == 'gemini-3.1-flash-live-preview'
-        assert 'server-secret' not in str(result)
-        assert captured['headers']['x-goog-api-key'] == 'server-secret'
-        assert captured['json']['uses'] == 1
-        assert captured['json']['newSessionExpireTime'] < captured['json']['expireTime']
-
-    asyncio.run(scenario())
-
-
-def test_live_token_requires_server_configuration():
-    async def scenario():
-        with pytest.raises(HTTPException) as error:
-            await create_live_token(Settings(gemini_live_api_key=''))
-        assert error.value.status_code == 503
+        monkeypatch.setattr(edge_tts_service.edge_tts, 'Communicate', FakeCommunicate)
+        result = await edge_tts_service.synthesize_mino_speech('Xin chào từ Mino')
+        assert result == b'mp3-audio'
 
     asyncio.run(scenario())
