@@ -1,3 +1,5 @@
+import os
+from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -22,6 +24,47 @@ router = APIRouter(prefix="/api", tags=["data"])
 
 def user_id(user: dict) -> str:
     return user["userId"]
+
+
+async def delete_word_image_files(database, uid: str, words: list[dict]):
+    upload_dir = Path("uploadImage").resolve()
+    if not upload_dir.exists() or not words:
+        return
+
+    deleted_legacy_ids = {
+        str(w.get("legacyId") or w.get("id"))
+        for w in words
+        if w.get("legacyId") or w.get("id")
+    }
+
+    filenames_to_check = set()
+    for word in words:
+        for key in ("localImageUrl", "imageUrl"):
+            val = word.get(key)
+            if isinstance(val, str) and "uploadImage/" in val:
+                fname = val.split("uploadImage/")[-1].split("?")[0].split("#")[0]
+                fname = Path(fname).name
+                if fname:
+                    filenames_to_check.add(fname)
+
+    for fname in filenames_to_check:
+        query = {
+            "userId": uid,
+            "legacyId": {"$nin": list(deleted_legacy_ids)},
+            "$or": [
+                {"localImageUrl": {"$regex": fname}},
+                {"imageUrl": {"$regex": fname}}
+            ]
+        }
+        other = await database.words.find_one(query)
+        if not other:
+            file_path = upload_dir / fname
+            try:
+                resolved_path = file_path.resolve()
+                if (upload_dir in resolved_path.parents or resolved_path.parent == upload_dir) and resolved_path.is_file():
+                    os.remove(resolved_path)
+            except Exception:
+                pass
 
 
 @router.get("/bootstrap")
@@ -89,6 +132,9 @@ async def update_topic(legacy_id: str, payload: dict = Body(...), user=Depends(g
 @router.delete("/topics/{legacy_id}", status_code=204)
 async def delete_topic(legacy_id: str, user=Depends(get_current_user), database=Depends(get_database)):
     uid = user_id(user)
+    words_cursor = database.words.find({"userId": uid, "topicId": legacy_id})
+    words_to_delete = [doc async for doc in words_cursor]
+    await delete_word_image_files(database, uid, words_to_delete)
     await database.topics.delete_one({"userId": uid, "legacyId": legacy_id})
     await database.words.delete_many({"userId": uid, "topicId": legacy_id})
 
@@ -100,6 +146,12 @@ async def get_words(user=Depends(get_current_user), database=Depends(get_databas
 
 @router.put("/words")
 async def put_words(payload: list[dict] = Body(...), user=Depends(get_current_user), database=Depends(get_database)):
+    uid = user_id(user)
+    existing_words = [w async for w in database.words.find({"userId": uid})]
+    new_legacy_ids = {str(item.get("id") or item.get("legacyId")) for item in payload if item.get("id") or item.get("legacyId")}
+    deleted_words = [w for w in existing_words if str(w.get("legacyId") or w.get("id")) not in new_legacy_ids]
+    if deleted_words:
+        await delete_word_image_files(database, uid, deleted_words)
     return await replace_resource("words", payload, user, database)
 
 
@@ -118,7 +170,11 @@ async def update_word(legacy_id: str, payload: dict = Body(...), user=Depends(ge
 
 @router.delete("/words/{legacy_id}", status_code=204)
 async def delete_word(legacy_id: str, user=Depends(get_current_user), database=Depends(get_database)):
-    await database.words.delete_one({"userId": user_id(user), "legacyId": legacy_id})
+    uid = user_id(user)
+    word = await database.words.find_one({"userId": uid, "legacyId": legacy_id})
+    if word:
+        await delete_word_image_files(database, uid, [word])
+    await database.words.delete_one({"userId": uid, "legacyId": legacy_id})
 
 
 @router.get("/settings")

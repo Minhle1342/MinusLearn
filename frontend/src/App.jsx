@@ -126,7 +126,8 @@ function LearningApp() {
     const syncTopics = () => {
       window.postMessage({
         type: 'MINUSLEARN_SYNC_TOPICS',
-        topics
+        topics,
+        existingWords: Array.isArray(words) ? words.map(w => w.word).filter(Boolean) : []
       }, '*');
     };
 
@@ -140,7 +141,7 @@ function LearningApp() {
 
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [topics]);
+  }, [topics, words]);
 
   const handleSaveTopic = name => {
     if (topicToEdit) {
@@ -157,6 +158,7 @@ function LearningApp() {
   };
 
   const handleDeleteTopic = id => {
+    apiRequest(`/api/topics/${id}`, { method: 'DELETE' }).catch(() => undefined);
     setTopics(topics.filter(topic => topic.id !== id));
     setWords(words.filter(word => word.topicId !== id));
     if (activeTopicId === id) setActiveTopicId(topics[0]?.id || null);
@@ -177,6 +179,7 @@ function LearningApp() {
   };
 
   const handleDeleteWord = id => {
+    apiRequest(`/api/words/${id}`, { method: 'DELETE' }).catch(() => undefined);
     setWords(words.filter(word => word.id !== id));
     setIsWordModalOpen(false);
   };

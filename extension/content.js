@@ -4,8 +4,12 @@ window.addEventListener("message", (event) => {
   if (event.source !== window) return;
 
   if (event.data.type && (event.data.type === "MINUSLEARN_SYNC_TOPICS")) {
-    chrome.storage.local.set({ topics: event.data.topics }, () => {
-      console.log("MinusLearn Clipper: Topics synced to extension storage.");
+    const dataToSet = { topics: event.data.topics };
+    if (event.data.existingWords) {
+      dataToSet.existingWords = event.data.existingWords;
+    }
+    chrome.storage.local.set(dataToSet, () => {
+      console.log("MinusLearn Clipper: Topics and existing words synced to extension storage.");
     });
   }
 }, false);

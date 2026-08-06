@@ -142,6 +142,7 @@ export function WordGrid({ words, activeTopicId, onAddWord, onEditWord, searchTe
       <div className="p-md md:p-xxl flex-1">
         <WordRescueAstronaut
           words={filteredWords}
+          settings={settings}
           onAddWord={onAddWord}
         />
       </div>
