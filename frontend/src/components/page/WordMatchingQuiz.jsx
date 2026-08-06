@@ -11,9 +11,41 @@ function shuffleArray(array) {
   return arr;
 }
 
+// Algorithm to divide words into rounds ensuring each round has at least 2 words (and max 5 words)
+function createRounds(items, maxChunk = 5, minChunk = 2) {
+  if (!items || items.length < minChunk) return [];
+  
+  const total = items.length;
+  if (total <= maxChunk) {
+    return [items];
+  }
+
+  const rounds = [];
+  let startIndex = 0;
+  let remaining = total;
+
+  while (remaining > 0) {
+    let size = maxChunk;
+    
+    if (remaining <= maxChunk) {
+      size = remaining;
+    } else if (remaining - maxChunk < minChunk) {
+      // Adjust size so the remaining chunk has at least minChunk items (>= 2)
+      size = remaining - minChunk;
+    }
+
+    rounds.push(items.slice(startIndex, startIndex + size));
+    startIndex += size;
+    remaining -= size;
+  }
+
+  return rounds;
+}
+
 export function WordMatchingQuiz({ words, settings, onAddWord }) {
   const [rounds, setRounds] = useState([]);
   const [currentRoundIndex, setCurrentRoundIndex] = useState(0);
+  const [initialRoundsCount, setInitialRoundsCount] = useState(0);
   const [retryWordIds, setRetryWordIds] = useState(new Set());
   
   // Round items
@@ -33,20 +65,17 @@ export function WordMatchingQuiz({ words, settings, onAddWord }) {
 
   // Initialize game
   const initGame = useCallback(() => {
-    if (!words || words.length === 0) {
+    if (!words || words.length < 2) {
       setRounds([]);
+      setInitialRoundsCount(0);
       return;
     }
 
     const shuffledWords = shuffleArray(words);
-    const chunkSize = 5;
-    const initialRounds = [];
-    
-    for (let i = 0; i < shuffledWords.length; i += chunkSize) {
-      initialRounds.push(shuffledWords.slice(i, i + chunkSize));
-    }
+    const initialRounds = createRounds(shuffledWords, 5, 2);
 
     setRounds(initialRounds);
+    setInitialRoundsCount(initialRounds.length);
     setCurrentRoundIndex(0);
     setRetryWordIds(new Set());
     setMatchedIds(new Set());
@@ -160,18 +189,27 @@ export function WordMatchingQuiz({ words, settings, onAddWord }) {
     } else {
       // Reached the end of initial rounds. Check if there are retry words
       if (retryWordIds.size > 0) {
-        const retryList = words.filter(w => retryWordIds.has(w.id));
-        const shuffledRetry = shuffleArray(retryList);
-        const chunkSize = 5;
-        const newRetryRounds = [];
+        let retryList = words.filter(w => retryWordIds.has(w.id));
 
-        for (let i = 0; i < shuffledRetry.length; i += chunkSize) {
-          newRetryRounds.push(shuffledRetry.slice(i, i + chunkSize));
+        // If retryList has only 1 word, pad it with another word from words pool so round size >= 2
+        if (retryList.length < 2 && words.length >= 2) {
+          const nonRetryWords = words.filter(w => !retryWordIds.has(w.id));
+          const extraWord = shuffleArray(nonRetryWords)[0];
+          if (extraWord) {
+            retryList = [...retryList, extraWord];
+          }
         }
 
-        setRounds(prev => [...prev, ...newRetryRounds]);
-        setRetryWordIds(new Set()); // Reset retry pool for upcoming rounds
-        setCurrentRoundIndex(prev => prev + 1);
+        const shuffledRetry = shuffleArray(retryList);
+        const newRetryRounds = createRounds(shuffledRetry, 5, 2);
+
+        if (newRetryRounds.length > 0) {
+          setRounds(prev => [...prev, ...newRetryRounds]);
+          setRetryWordIds(new Set()); // Reset retry pool for upcoming rounds
+          setCurrentRoundIndex(prev => prev + 1);
+        } else {
+          setIsCompleted(true);
+        }
       } else {
         // Game completely finished!
         setIsCompleted(true);
@@ -179,13 +217,13 @@ export function WordMatchingQuiz({ words, settings, onAddWord }) {
     }
   };
 
-  if (!words || words.length === 0) {
+  if (!words || words.length < 2) {
     return (
       <div className="flex flex-col items-center justify-center py-xxl text-center mt-12">
         <div className="w-20 h-20 mb-md rounded-full bg-surface-container-low flex items-center justify-center">
           <Puzzle size={40} className="text-primary" />
         </div>
-        <h3 className="font-heading-1 text-heading-1 text-on-surface mb-xs">Chưa có từ vựng để nối</h3>
+        <h3 className="font-heading-1 text-heading-1 text-on-surface mb-xs">Chưa đủ từ vựng để nối</h3>
         <p className="font-body-md text-body-md text-on-surface-variant max-w-md mb-lg">
           Hãy thêm ít nhất 2 từ vựng vào danh sách để tham gia trò chơi Quiz Nối từ.
         </p>
@@ -202,7 +240,7 @@ export function WordMatchingQuiz({ words, settings, onAddWord }) {
   }
 
   const currentWords = rounds[currentRoundIndex] || [];
-  const isRetryRound = currentRoundIndex >= Math.ceil(words.length / 5);
+  const isRetryRound = currentRoundIndex >= initialRoundsCount;
 
   return (
     <div className="flex flex-col max-w-4xl mx-auto w-full p-md md:p-lg gap-md">
